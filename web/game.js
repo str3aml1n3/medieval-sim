@@ -303,7 +303,28 @@ addEventListener('mousemove', e => { if (document.pointerLockElement) { yaw -= e
 addEventListener('mousedown', e => { if (!document.pointerLockElement || lockedUI) return; if (e.button === 0) playerAttack(); if (e.button === 2) player.blocking = true; });
 addEventListener('mouseup', e => { if (e.button === 2) player.blocking = false; });
 addEventListener('contextmenu', e => e.preventDefault());
-$('start').addEventListener('click', async () => { $('start').style.display = 'none'; if (actx.state !== 'running') await actx.resume(); startMusic(); renderer.domElement.requestPointerLock(); });
+// ---- start screen + pause menu (controls legend, volumes, restart)
+let started = false, paused = false;
+for (const id of ['startLegend', 'pauseLegend']) $(id).appendChild($('legendTpl').content.cloneNode(true));
+function setPaused(v) {
+  paused = v; $('pause').style.display = v ? 'flex' : 'none';
+  if (v) { for (const k in keys) keys[k] = false; player.blocking = false; if (document.pointerLockElement) document.exitPointerLock(); $('btnResume').focus(); }
+  else renderer.domElement.requestPointerLock();
+}
+// Esc releases pointer lock in every browser; treat losing the lock mid-game as "open the menu"
+document.addEventListener('pointerlockchange', () => { if (started && !document.pointerLockElement && !lockedUI && !paused) setPaused(true); });
+$('btnResume').addEventListener('click', () => setPaused(false));
+$('btnRestart').addEventListener('click', () => { restartArena(); setPaused(false); });
+$('volMusic').addEventListener('input', e => { musicVol = e.target.value / 100; if (musicVol > 0 && !musicOn) musicOn = true; applyMusicLevel(); });
+$('volSfx').addEventListener('input', e => listener.setMasterVolume(e.target.value / 100));
+function restartArena() {
+  closeConvo && convo && closeConvo();
+  Object.assign(player, { dead: false, deadT: 0, hp: 100, atkT: -1, vy: 0 }); player.root.rotation.x = 0; player.setDrawn(false);
+  player.pos.copy(WP.OCR_OUTSIDE_ARENA).y += 0.5; player.heading = Math.PI * 0.75; $('msg').textContent = '';
+  for (const n of npcs) { Object.assign(n, { dead: false, deadT: 0, hp: n.maxHp, hostile: null, state: 'idle', atkT: -1, vy: 0 }); n.root.rotation.x = 0; n.pos.copy(n.home); n.setDrawn(false); }
+  startDuel();
+}
+$('start').addEventListener('click', async () => { $('start').style.display = 'none'; started = true; if (actx.state !== 'running') await actx.resume(); startMusic(); renderer.domElement.requestPointerLock(); });
 $('loadmsg').textContent = 'Click to begin';
 
 // ---------------------------------------------------------------- combat
@@ -374,6 +395,9 @@ function playTopic(n, t) {
 }
 function closeConvo() { if (convo) convo.npc.talking = false; convo = null; lockedUI = false; $('menu').style.display = 'none'; $('sub').innerHTML = ''; if (voiceAudio && voiceAudio.isPlaying) { voiceAudio.onEnded = () => {}; voiceAudio.stop(); } renderer.domElement.requestPointerLock(); }
 function onKey(e) {
+  if (!started) return;
+  if (paused) { if (e.code === 'Escape' || e.code === 'KeyP') setPaused(false); return; }
+  if (e.code === 'KeyP' && !convo) return setPaused(true);
   if (convo && convo.state === 'menu') { const i = parseInt(e.key) - 1; if (convo.opts[i]) convo.opts[i].run(); if (e.code === 'Escape') closeConvo(); return; }
   if (convo && e.code === 'Escape') return closeConvo();
   if (e.code === 'KeyE' && !convo && !player.dead) { const n = nearestTalker(); if (n) openMenu(n); }
@@ -414,15 +438,36 @@ function faceTo(n, p, k) {
   let d = target - n.heading; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; n.heading += d * Math.min(1, k);
 }
 
-// ---------------------------------------------------------------- music (procedural)
-let musicOn = true, mgain = null, nextNote = 0, step = 0, intensity = 0;
-function startMusic() {
-  if (mgain) return; mgain = actx.createGain(); mgain.gain.value = 0.22; mgain.connect(actx.destination);
-  // drone
-  [73.42, 110, 146.83].forEach((f, i) => { const o = actx.createOscillator(); o.type = i ? 'triangle' : 'sawtooth'; o.frequency.value = f; const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 400; const g = actx.createGain(); g.gain.value = i ? 0.05 : 0.07; o.connect(lp).connect(g).connect(mgain); o.start(); });
-  nextNote = actx.currentTime + 0.2; setInterval(schedule, 100);
+// ---------------------------------------------------------------- music
+// Prefers the game's own themes rendered by export_music.py (calm + fight, crossfaded by combat intensity).
+// Falls back to a small procedural score if those files are missing.
+let musicOn = true, mgain = null, nextNote = 0, step = 0, intensity = 0, musicVol = 0.7, procedural = false;
+const tracks = {};
+const musicLevel = () => (musicOn ? musicVol * (procedural ? 0.32 : 1) : 0);
+const fetchBuf = u => fetch(u).then(r => (r.ok ? r.arrayBuffer() : null)).then(b => b && actx.decodeAudioData(b)).catch(() => null);
+async function startMusic() {
+  if (mgain) return; mgain = actx.createGain(); mgain.gain.value = 0; mgain.connect(actx.destination);
+  $('musicSrc').textContent = 'loading…';
+  const [std, fgt] = await Promise.all([fetchBuf(E + 'music/oc_std.wav'), fetchBuf(E + 'music/oc_fgt.wav')]);
+  if (std) {
+    for (const [k, b] of [['std', std], ['fgt', fgt || std]]) {
+      const s = actx.createBufferSource(); s.buffer = b; s.loop = true;
+      const g = actx.createGain(); g.gain.value = k === 'std' ? 1 : 0; s.connect(g).connect(mgain); s.start(); tracks[k] = g;
+    }
+    $('musicSrc').textContent = 'Old Camp theme';
+  } else {
+    procedural = true; $('musicSrc').textContent = 'generated';
+    [73.42, 110, 146.83].forEach((f, i) => { const o = actx.createOscillator(); o.type = i ? 'triangle' : 'sawtooth'; o.frequency.value = f; const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 400; const g = actx.createGain(); g.gain.value = i ? 0.05 : 0.07; o.connect(lp).connect(g).connect(mgain); o.start(); });
+    nextNote = actx.currentTime + 0.2; setInterval(schedule, 100);
+  }
+  mgain.gain.setTargetAtTime(musicLevel(), actx.currentTime, 0.8);
 }
-function toggleMusic() { musicOn = !musicOn; if (mgain) mgain.gain.value = musicOn ? 0.22 : 0; }
+function applyMusicLevel() { if (mgain) mgain.gain.setTargetAtTime(musicLevel(), actx.currentTime, 0.15); }
+function toggleMusic() { musicOn = !musicOn; applyMusicLevel(); }
+function mixMusic() { // equal-power crossfade between calm and fight themes
+  if (!tracks.std) return;
+  tracks.std.gain.value = Math.cos(intensity * Math.PI / 2); tracks.fgt.gain.value = Math.sin(intensity * Math.PI / 2);
+}
 const DORIAN = [0, 2, 3, 5, 7, 9, 10], ROOT = 146.83;
 const CHORDS = [[0, 2, 4], [6, 1, 3], [3, 5, 0], [0, 2, 4]];
 const noteF = d => ROOT * Math.pow(2, (DORIAN[((d % 7) + 7) % 7] + 12 * Math.floor(d / 7)) / 12);
@@ -467,6 +512,7 @@ function updateBars() {
 let hudT = 0;
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
+  if (paused) { renderer.render(scene, camera); requestAnimationFrame(frame); return; } // world frozen behind the menu
   const p = player;
   if (!p.dead && !lockedUI) {
     let f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0), s = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
@@ -487,7 +533,7 @@ function frame() {
   entities.forEach(e => e.update(dt));
   // music intensity
   const fighting = npcs.some(n => n.hostile && !n.dead);
-  intensity += ((fighting ? 1 : 0) - intensity) * Math.min(1, dt * 0.8);
+  intensity += ((fighting ? 1 : 0) - intensity) * Math.min(1, dt * 0.6); mixMusic();
   // camera
   const tgt = p.pos.clone().setY(p.pos.y + 1.55); const dist = 4.2;
   const off = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(dist);

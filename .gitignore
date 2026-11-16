@@ -3,3 +3,5 @@ files.txt
 __pycache__/
 *.pyc
 node_modules/
+tools/dmusic/
+tools/render/build/

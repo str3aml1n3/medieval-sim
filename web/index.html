@@ -21,16 +21,49 @@ canvas{display:block}
 .nb{position:absolute;width:60px;height:5px;background:#2a0f0f;border:1px solid #000;transform:translate(-50%,-50%)}
 .nb i{display:block;height:100%;background:#c44}
 .nb span{position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:12px;white-space:nowrap;text-shadow:0 0 3px #000}
+#pause{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:4}
+#pause .panel{background:rgba(18,14,8,.96);border:1px solid #8a7a50;padding:22px 28px;width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box}
+#pause h2{margin:0 0 14px;font-weight:normal;letter-spacing:3px;color:#e0b860;text-align:center}
+#pause h3{margin:16px 0 6px;font-weight:normal;color:#e0b860;font-size:15px;border-bottom:1px solid #4a3a1a;padding-bottom:4px}
+.legend{width:100%;border-collapse:collapse;font-size:14px}
+.legend td{padding:3px 4px;vertical-align:top}.legend td:first-child{white-space:nowrap;width:42%}
+kbd{display:inline-block;min-width:18px;padding:1px 6px;margin:1px 2px 1px 0;border:1px solid #8a7a50;border-bottom-width:2px;border-radius:3px;background:#2a2012;font:12px/1.4 Georgia,serif;text-align:center;color:#f0e4c8}
+.row{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:14px}.row label{width:110px}.row input[type=range]{flex:1;accent-color:#b08a40}
+.btns{display:flex;gap:10px;justify-content:center;margin-top:18px;flex-wrap:wrap}
+.btns button{font:15px Georgia,serif;color:#e8dcc0;background:#3a2c14;border:1px solid #8a7a50;padding:7px 18px;cursor:pointer}
+.btns button:hover,.btns button:focus-visible{background:#5a4420;color:#fff;outline:none}
+#start .legend{max-width:420px;margin:18px auto 0;text-align:left}
 </style></head><body>
 <div id="hud">
  <div id="bars"></div>
  <div id="msg"></div>
- <div id="help">WASD move · Shift run · Mouse look · LMB attack · RMB block<br>F draw/sheathe weapon · E talk · M music · 1-4 dialogue choice</div>
+ <div id="help"><kbd>Esc</kbd> menu &amp; controls</div>
  <div id="sub"></div><div id="prompt"></div>
  <div id="menu"></div>
  <div id="hp"><div id="hpf"></div></div>
 </div>
-<div id="start"><h1>THE ARENA</h1><div id="loadmsg">Loading…</div></div>
+<template id="legendTpl"><table class="legend">
+ <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Move</td></tr>
+ <tr><td><kbd>Shift</kbd></td><td>Run</td></tr>
+ <tr><td>Mouse</td><td>Look around</td></tr>
+ <tr><td>Left click / <kbd>Space</kbd></td><td>Attack (draws weapon first if sheathed)</td></tr>
+ <tr><td>Right click (hold)</td><td>Block — facing the attacker cuts damage</td></tr>
+ <tr><td><kbd>F</kbd></td><td>Draw / sheathe weapon</td></tr>
+ <tr><td><kbd>E</kbd></td><td>Talk to a nearby NPC</td></tr>
+ <tr><td><kbd>1</kbd>–<kbd>7</kbd></td><td>Pick a dialogue option</td></tr>
+ <tr><td><kbd>M</kbd></td><td>Music on / off</td></tr>
+ <tr><td><kbd>R</kbd></td><td>Get back up after being defeated</td></tr>
+ <tr><td><kbd>Esc</kbd> / <kbd>P</kbd></td><td>Pause menu</td></tr>
+</table></template>
+<div id="start"><h1>THE ARENA</h1><div id="loadmsg">Loading…</div><div id="startLegend"></div></div>
+<div id="pause" role="dialog" aria-modal="true" aria-labelledby="pauseTitle"><div class="panel">
+ <h2 id="pauseTitle">PAUSED</h2>
+ <h3>Controls</h3><div id="pauseLegend"></div>
+ <h3>Sound</h3>
+ <div class="row"><label for="volMusic">Music</label><input id="volMusic" type="range" min="0" max="100" value="70"><span id="musicSrc" style="font-size:12px;opacity:.7"></span></div>
+ <div class="row"><label for="volSfx">Effects &amp; voices</label><input id="volSfx" type="range" min="0" max="100" value="100"></div>
+ <div class="btns"><button id="btnResume">Resume</button><button id="btnRestart">Restart arena</button></div>
+</div></div>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
 <script type="module" src="game.js"></script>
 </body></html>
