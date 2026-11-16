@@ -51,7 +51,7 @@ def skin_parts(mdm):
             if not t: continue
             p=[];u=[];si=[];sw=[]
             for tr in sub.triangles:
-                for k in (0,2,1):
+                for k in (0,1,2):
                     wd=sub.wedges[tr.wedges[k]]
                     v=verts[wd.index]
                     p+= [round(float(c),4) for c in v[0]]; u+=[round(wd.texture.x,4),round(1-wd.texture.y,4)]
@@ -66,7 +66,7 @@ def rigid_part(mesh, bone, tex_override=None):
         if not t: continue
         p=[];u=[];si=[];sw=[]
         for tr in sub.triangles:
-            for k in (0,2,1):
+            for k in (0,1,2):
                 wd=sub.wedges[tr.wedges[k]]; q=mesh.positions[wd.index]
                 P=conv((W@np.array([q.x,q.y,q.z,1.0]))[:3])
                 p+=[round(float(c),4) for c in P]; u+=[round(wd.texture.x,4),round(1-wd.texture.y,4)]

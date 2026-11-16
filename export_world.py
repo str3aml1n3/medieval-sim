@@ -8,8 +8,8 @@ S=0.01
 groups=collections.defaultdict(lambda: {'p':[], 'u':[]})
 def add(tex, p3, uv3):
     g=groups[tex]
-    # reverse winding after z flip
-    for i in (0,2,1):
+    # z flip + Gothic winding: keep order (verified: floors face up)
+    for i in (0,1,2):
         x,y,z=p3[i]; g['p'] += [x*S, y*S, -z*S]
         g['u'] += [uv3[i][0], 1-uv3[i][1]]
 m=w.mesh; pos=m.positions; feats=m.features
@@ -17,12 +17,14 @@ def texname(mat):
     return (mat.texture or '').upper()
 nt=0
 for poly in m.polygons:
+    if poly.is_ghost_occluder: continue  # invisible helper polys
     mat=m.materials[poly.material_index]
     if mat.group is not None and 'WATER' in str(mat.group).upper(): pass
     idx=poly.position_indices; fi=poly.feature_indices
     p=[pos[i] for i in idx]
     if not (abs(p[0].x-CX)<R and abs(p[0].z-CZ)<R): continue
     t=texname(mat)
+    if t and poly.is_portal: t=t+'|PORTAL'  # door curtains: visible but walk-through
     if not t: continue
     for k in range(1,len(idx)-1):
         tri=[0,k,k+1]
@@ -63,13 +65,13 @@ print('props',props,'skipped',len(skipped))
 os.makedirs('export/tex',exist_ok=True)
 out=[]; texinfo={}
 for t,g in groups.items():
-    base=t.rsplit('.',1)[0]
+    portal=t.endswith('|PORTAL'); base=t.replace('|PORTAL','').rsplit('.',1)[0]
     f=vfs.find(base+'-C.TEX')
     if not f: continue
     tx=zenkit.Texture.load(f.open())
     img=Image.frombytes('RGBA',(tx.width,tx.height),tx.mipmap_rgba(0))
     alpha=img.getchannel('A').getextrema()[0]<250
     img.save(f'export/tex/{base}.png')
-    out.append({'tex':base,'alpha':alpha,'p':[round(v,3) for v in g['p']],'u':[round(v,4) for v in g['u']]})
+    out.append({'tex':base,'alpha':alpha,'portal':portal,'p':[round(v,3) for v in g['p']],'u':[round(v,4) for v in g['u']]})
 json.dump({'meshes':out,'center':[CX*S,0,-CZ*S]},open('export/world.json','w'),separators=(',',':'))
 print('meshes',len(out),'size MB',os.path.getsize('export/world.json')/1e6)

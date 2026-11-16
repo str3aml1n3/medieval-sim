@@ -16,7 +16,7 @@ const scene = new THREE.Scene();
 const SKY = 0x9db4c8;
 scene.background = new THREE.Color(SKY);
 scene.fog = new THREE.Fog(SKY, 45, 150);
-const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.1, 400);
+const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.2, 400);
 addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 scene.add(new THREE.AmbientLight(0xffffff, 1.5));
 const sun = new THREE.DirectionalLight(0xfff0d0, 1.6); sun.position.set(-30, 60, 20); scene.add(sun);
@@ -40,6 +40,7 @@ const WP = Object.fromEntries(wps.map(w => [w.n, new THREE.Vector3(w.x, w.y, w.z
 
 // ---------------------------------------------------------------- world + collision grid
 const tris = []; // {a,b,c,n,minY,maxY}
+const worldMeshes = [], camRay = new THREE.Raycaster(), camMat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
 const CELL = 3, grid = new Map();
 const key = (cx, cz) => cx * 8192 + cz;
 function addTri(a, b, c) {
@@ -59,11 +60,21 @@ for (const m of world.meshes) {
   g.setAttribute('uv', new THREE.Float32BufferAttribute(m.u, 2));
   g.computeVertexNormals();
   const mat = new THREE.MeshLambertMaterial({ map: getTex(m.tex), alphaTest: m.alpha ? 0.5 : 0, side: m.alpha ? THREE.DoubleSide : THREE.FrontSide });
-  scene.add(new THREE.Mesh(g, mat));
-  if (!m.alpha) for (let i = 0; i < m.p.length; i += 9)
+  const wm = new THREE.Mesh(g, mat); scene.add(wm);
+  // camera-collision proxy: same geometry, double-sided so rays hit walls from either side (not rendered)
+  if (!m.alpha && !m.portal) { const cm = new THREE.Mesh(g, camMat); cm.updateMatrixWorld(true); worldMeshes.push(cm); }
+  if (!m.alpha && !m.portal) for (let i = 0; i < m.p.length; i += 9)
     addTri(new THREE.Vector3(m.p[i], m.p[i + 1], m.p[i + 2]), new THREE.Vector3(m.p[i + 3], m.p[i + 4], m.p[i + 5]), new THREE.Vector3(m.p[i + 6], m.p[i + 7], m.p[i + 8]));
 }
 function cellTris(x, z) { return grid.get(key(Math.floor(x / CELL), Math.floor(z / CELL))) || []; }
+// all triangles in cells overlapping a circle (walls near a cell border were missed before)
+function nearTris(x, z, r) {
+  const x0 = Math.floor((x - r) / CELL), x1 = Math.floor((x + r) / CELL), z0 = Math.floor((z - r) / CELL), z1 = Math.floor((z + r) / CELL);
+  if (x0 === x1 && z0 === z1) return cellTris(x, z);
+  const s = new Set();
+  for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) for (const i of grid.get(key(cx, cz)) || []) s.add(i);
+  return s;
+}
 function groundAt(x, z, yRef, step = 0.7) {
   let best = null;
   for (const i of cellTris(x, z)) {
@@ -82,8 +93,8 @@ const _c = new THREE.Vector3(), _p = new THREE.Vector3();
 function pushOut(pos, r = 0.42) {
   for (let it = 0; it < 2; it++) {
     _c.set(pos.x, pos.y + 0.95, pos.z);
-    for (const i of cellTris(pos.x, pos.z)) {
-      const t = tris[i]; if (t.n.y > 0.45) continue;
+    for (const i of nearTris(pos.x, pos.z, r)) {
+      const t = tris[i]; if (Math.abs(t.n.y) > 0.45) continue; // floors AND ceilings are not walls
       if (Math.max(t.a.y, t.b.y, t.c.y) < pos.y + 0.35 || Math.min(t.a.y, t.b.y, t.c.y) > pos.y + 1.7) continue;
       t.tri.closestPointToPoint(_c, _p);
       const dx = _c.x - _p.x, dz = _c.z - _p.z, h = Math.hypot(dx, dz), dy = _c.y - _p.y, dist = Math.hypot(h, dy);
@@ -91,10 +102,18 @@ function pushOut(pos, r = 0.42) {
     }
   }
 }
+// a move is valid if there is ground under the new spot and no floor surface between knee and head
+// height (i.e. we'd be walking into a slope/step that's too high to climb)
+function canStand(from, to) {
+  if (groundAt(to.x, to.z, from.y + 0.2, 0.55) === null) return false;
+  const top = groundAt(to.x, to.z, from.y + 1.5, 0);
+  return top === null || top <= from.y + 0.6;
+}
 function settle(e, dt) {
   const g = groundAt(e.pos.x, e.pos.z, e.pos.y + 0.2);
   if (g === null) { e.vy -= 20 * dt; e.pos.y += e.vy * dt; if (e.pos.y < -60) e.pos.y = e.lastGood; return; }
-  if (e.pos.y > g + 0.05) { e.vy -= 20 * dt; e.pos.y = Math.max(g, e.pos.y + e.vy * dt); if (e.pos.y === g) e.vy = 0; }
+  // stick to the ground when walking down slopes/steps instead of bouncing in free fall
+  if (e.pos.y > g + 0.05 && (e.vy < -0.5 || e.pos.y > g + 0.45)) { e.vy -= 20 * dt; e.pos.y = Math.max(g, e.pos.y + e.vy * dt); if (e.pos.y === g) e.vy = 0; }
   else { e.pos.y = g; e.vy = 0; }
   e.lastGood = e.pos.y;
 }
@@ -143,13 +162,16 @@ const bi = name => bonesDef.findIndex(b => b.name === name);
 class Char {
   constructor(o) {
     Object.assign(this, { name: 'NPC', hp: 100, maxHp: 100, pos: new THREE.Vector3(), vy: 0, lastGood: 0, heading: 0, speed: 0, hostile: null, state: 'idle', t: 0, atkT: -1, atkCd: 0, blocking: false, drawn: false, hurtT: 0, dead: false, deadT: 0, phase: 0, talking: false, isPlayer: false, ai: null }, o);
-    this.root = new THREE.Group(); this.body = new THREE.Group(); this.body.position.y = feetOffset; this.root.add(this.body);
+    this.root = new THREE.Group(); this.root.rotation.order = 'YXZ'; this.body = new THREE.Group(); this.body.position.y = feetOffset; this.body.rotation.y = MODEL_YAW; this.root.add(this.body);
     this.bones = bonesDef.map(b => { const n = new THREE.Bone(); n.name = b.name; new THREE.Matrix4().fromArray(b.m).decompose(n.position, n.quaternion, n.scale); return n; });
     bonesDef.forEach((b, i) => { if (b.parent < 0) this.body.add(this.bones[i]); else this.bones[b.parent].add(this.bones[i]); });
     this.body.updateMatrixWorld(true);
     this.skel = new THREE.Skeleton(this.bones);
     const parts = [...chars.outfits[o.outfit], ...(chars.heads[o.head] || [])];
-    const mk = (p, vis = true) => { const m = new THREE.SkinnedMesh(gGeo(p), new THREE.MeshLambertMaterial({ map: getTex(p.tex), alphaTest: 0.4 })); m.frustumCulled = false; this.body.add(m); m.bind(this.skel, m.matrixWorld); return m; };
+    const mk = (p, vis = true) => { const m = new THREE.SkinnedMesh(gGeo(p), new THREE.MeshLambertMaterial({ map: getTex(p.tex), alphaTest: 0.4 })); m.frustumCulled = false; this.body.add(m);
+      // the mesh's world matrix must include the body offset/facing *before* binding, otherwise every bone
+      // pivots ~1 m away from its joint (stretched limbs) and the whole model renders ~1 m too low
+      this.root.updateMatrixWorld(true); m.bind(this.skel, m.matrixWorld); return m; };
     parts.forEach(p => mk(p));
     this.weapon = (chars.weapons[o.weapon] || []).map(p => mk(p)); this.weapon.forEach(m => m.visible = false);
     this.rest = this.bones.map(b => b.quaternion.clone());
@@ -174,7 +196,7 @@ class Char {
       this.rot('BIP01 L CALF', -(0.15 + Math.max(0, -c) * 0.9) * k); this.rot('BIP01 R CALF', -(0.15 + Math.max(0, c) * 0.9) * k);
       let armR = -s * 0.5 * k, armL = s * 0.5 * k, foreR = 0.2 + 0.25 * k, foreL = 0.2 + 0.25 * k, lean = 0.08 * k + (run ? 0.12 : 0);
       if (!this.atkT || this.atkT < 0) {
-        if (this.drawn) { armR = 0.5; foreR = 1.0; armL = 0.2; }
+        if (this.drawn) { armR = 0.35 - s * 0.2 * k; foreR = 0.65; armL = 0.15 + s * 0.3 * k; }
         if (this.blocking) { armR = 1.4; foreR = 1.5; armL = 0.6; }
         if (this.talking) { const g = Math.sin(this.t * 3) * 0.3; armR = 0.5 + g; foreR = 0.9 + g; armL = 0.4 - g; foreL = 0.8; }
         if (this.cheer) { armR = 2.3 + Math.sin(this.t * 14) * 0.25; armL = 2.2 - Math.sin(this.t * 14) * 0.25; foreR = 0.3; foreL = 0.3; }
@@ -202,9 +224,14 @@ class Char {
 
 // calibrate limb axes once with a throw-away skeleton
 const CAL = {};
+var MODEL_YAW = 0;
 {
   const tmp = new Char({ outfit: 'GRDM', head: 'BALD', weapon: 'sword' });
   tmp.root.updateMatrixWorld(true);
+  // which way does the model face? toes point forward; game convention is forward = -Z
+  { const f = new THREE.Vector3(), t = new THREE.Vector3(); tmp.bones[bi('BIP01 L FOOT')].getWorldPosition(f); tmp.bones[bi('BIP01 L TOE0')].getWorldPosition(t);
+    const d = t.sub(f); MODEL_YAW = -Math.atan2(-d.x, -d.z); console.log('toe dir', d.x.toFixed(3), d.z.toFixed(3), 'model yaw', MODEL_YAW.toFixed(2));
+    tmp.body.rotation.y = MODEL_YAW; tmp.root.updateMatrixWorld(true); }
   const fwdWorld = new THREE.Vector3(0, 0, -1);
   const pairs = [['BIP01 L THIGH', 'BIP01 L CALF'], ['BIP01 R THIGH', 'BIP01 R CALF'], ['BIP01 L CALF', 'BIP01 L FOOT'], ['BIP01 R CALF', 'BIP01 R FOOT'],
     ['BIP01 L UPPERARM', 'BIP01 L FOREARM'], ['BIP01 R UPPERARM', 'BIP01 R FOREARM'], ['BIP01 L FOREARM', 'BIP01 L HAND'], ['BIP01 R FOREARM', 'BIP01 R HAND'],
@@ -236,13 +263,15 @@ const entities = [];
 const player = new Char({ name: 'You', outfit: 'GRDM', head: 'FIGHTER', weapon: 'sword', isPlayer: true });
 player.pos.copy(WP.OCR_OUTSIDE_ARENA || new THREE.Vector3(49.7, -9.5, -42.4)); player.pos.y += 0.5; player.heading = Math.PI * 0.75; entities.push(player);
 const wpFix = (name, dy = 0.6) => { const w = WP[name]; return w ? w.clone().add(new THREE.Vector3(0, dy, 0)) : new THREE.Vector3(40, -9, -34); };
-const PIT = wpFix('OCR_ARENABATTLE', 0.8);
+// Arena floor = centre of the OCR_ARENA_01..09 ring. (OCR_ARENABATTLE is the fighters' room *under* the arena.)
+const ring = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => WP['OCR_ARENA_0' + i]).filter(Boolean);
+const PIT = ring.length ? ring.reduce((a, b) => a.clone().add(b)).divideScalar(ring.length).add(new THREE.Vector3(0, 0.6, 0)) : wpFix('OCR_ARENA_01');
 const castCfg = {
   KIRGO: { outfit: 'SLDM', head: 'FIGHTER', weapon: 'sword', pos: PIT.clone().add(new THREE.Vector3(-1.8, 0, 0)), role: 'duel' },
   WHISTLER: { outfit: 'STTM', head: 'THIEF', weapon: 'axe', pos: PIT.clone().add(new THREE.Vector3(1.8, 0, 0)), role: 'duel' },
-  THORUS: { outfit: 'GRDM', head: 'BALD', weapon: 'sword', pos: wpFix('OCR_ARENA_03'), role: 'watch' },
-  BLOODWYN: { outfit: 'SLDM', head: 'FATBALD', weapon: 'mace', pos: wpFix('OCR_ARENA_06'), role: 'watch' },
-  FLETCHER: { outfit: 'STTM', head: 'PSIONIC', weapon: 'hammer', pos: wpFix('OCR_ARENA_09'), role: 'watch' },
+  THORUS: { outfit: 'GRDM', head: 'BALD', weapon: 'sword', pos: wpFix('OCR_ARENA_BARONS_HUT'), role: 'watch' },
+  BLOODWYN: { outfit: 'SLDM', head: 'FATBALD', weapon: 'mace', pos: wpFix('OCR_OUTSIDE_ARENA_HANGAROUND'), role: 'watch' },
+  FLETCHER: { outfit: 'STTM', head: 'PSIONIC', weapon: 'hammer', pos: wpFix('OCR_OUTSIDE_ARENA_01'), role: 'watch' },
   SNAF: { outfit: 'VLKM', head: 'PONY', weapon: 'mace', pos: wpFix('OCR_OUTSIDE_ARENA_BENCH1'), role: 'idle' },
 };
 const npcs = [];
@@ -376,7 +405,7 @@ function aiStep(n, dt) {
     else if (n.duty === 'idle') { n.wt = (n.wt || 0) - dt; if (n.wt < 0) { n.wt = rand(4, 9); n.wander = n.home.clone().add(new THREE.Vector3(rand(-3, 3), 0, rand(-3, 3))); } if (n.wander && dist2({ pos: n.wander }, n) > 0.4) { faceTo(n, n.wander, dt * 4); move = 1.2; } }
   }
   n.speed = Math.abs(move);
-  if (move) { const f = n.fwd; const m = move * dt; const old = n.pos.clone(); n.pos.x += f.x * m; n.pos.z += f.z * m; pushOut(n.pos); const g = groundAt(n.pos.x, n.pos.z, n.pos.y + 0.5); if (g === null || g < old.y - 1.2) { n.pos.copy(old); } }
+  if (move) { const f = n.fwd; const m = move * dt; const old = n.pos.clone(); n.pos.x += f.x * m; n.pos.z += f.z * m; pushOut(n.pos); if (!canStand(old, n.pos) || groundAt(n.pos.x, n.pos.z, old.y + 0.2) < old.y - 1.2) { n.pos.copy(old); } }
   // entity separation
   for (const o of entities) if (o !== n && !o.dead) { const dx = n.pos.x - o.pos.x, dz = n.pos.z - o.pos.z, d = Math.hypot(dx, dz); if (d < 0.8 && d > 1e-4) { n.pos.x += dx / d * (0.8 - d) * 0.5; n.pos.z += dz / d * (0.8 - d) * 0.5; } }
 }
@@ -447,14 +476,14 @@ function frame() {
       const target = Math.atan2(-dir.x, -dir.z); let d = target - p.heading; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; p.heading += d * Math.min(1, dt * 12);
       const old = p.pos.clone(); const sp = p.atkT >= 0 ? spd * 0.3 : p.blocking ? spd * 0.5 : spd;
       p.pos.addScaledVector(dir, sp * dt); pushOut(p.pos);
-      const g = groundAt(p.pos.x, p.pos.z, p.pos.y + 0.2, 0.75); if (g === null && p.vy === 0) p.pos.copy(old);
+      if (!canStand(old, p.pos)) p.pos.copy(old);
       p.speed = sp;
     } else p.speed = 0;
     if (p.atkT >= 0) { p.atkT += dt; if (!p.hitDone && p.atkT > 0.34) { p.hitDone = true; p.heading = p.heading; strike(p, npcs, 16, 26); } if (p.atkT > 0.7) p.atkT = -1; }
     p.atkCd -= dt;
   } else if (!p.dead && convo) { p.speed = 0; faceTo(p, convo.npc.pos, dt * 6); }
   settle(p, dt);
-  for (const n of npcs) { aiStep(n, dt); settle(n, dt); }
+  if (!window.__freezeAI) for (const n of npcs) { aiStep(n, dt); settle(n, dt); }
   entities.forEach(e => e.update(dt));
   // music intensity
   const fighting = npcs.some(n => n.hostile && !n.dead);
@@ -464,9 +493,13 @@ function frame() {
   const off = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(dist);
   const wantPos = tgt.clone().add(off);
   if (!camInit) { camPos.copy(wantPos); camInit = true; } else camPos.lerp(wantPos, Math.min(1, dt * 12));
-  camera.position.copy(camPos); camera.lookAt(tgt);
+  // keep the camera out of walls/roofs: pull it in front of the first hit between player and camera
+  const toCam = camPos.clone().sub(tgt); const cd = toCam.length(); toCam.normalize();
+  camRay.set(tgt, toCam); camRay.far = cd; const hit = camRay.intersectObjects(worldMeshes, false)[0];
+  camera.position.copy(hit ? tgt.clone().addScaledVector(toCam, Math.max(0.3, hit.distance - 0.25)) : camPos); camera.lookAt(tgt);
   const gc = groundAt(camera.position.x, camera.position.z, camera.position.y + 5, 10); if (gc !== null && camera.position.y < gc + 0.4) camera.position.y = gc + 0.4;
-  flames.forEach(l => l.intensity = 12 + Math.sin(performance.now() * 0.02 + l.position.x) * 2.5 + Math.random());
+  if (window.__dbgCam) { camera.position.copy(window.__dbgCam.pos); camera.lookAt(window.__dbgCam.target); }
+  flames.forEach(l =>l.intensity = 12 + Math.sin(performance.now() * 0.02 + l.position.x) * 2.5 + Math.random());
   if ((hudT += dt) > 0.05) { hudT = 0; updateBars(); }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
