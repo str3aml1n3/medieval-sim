@@ -1,6 +1,7 @@
 # Renders Gothic's DirectMusic themes to seamless-looping WAVs with tools/render (GothicKit/dmusic).
 import subprocess, wave, numpy as np, os, sys, json
-GOTHIC = r"C:\Program Files (x86)\Steam\steamapps\common\Gothic\_work\Data\Music\orchestra"
+from common import WORK
+GOTHIC = os.path.join(WORK, "Music", "orchestra")
 EXE = os.path.join('tools', 'render', 'build', 'render-music.exe')
 OUT = os.path.join('export', 'music'); os.makedirs(OUT, exist_ok=True)
 THEMES = {'oc_std': 'OC_Day_Std.sgt', 'oc_fgt': 'OC_Day_Fgt.sgt'}

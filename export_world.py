@@ -2,8 +2,8 @@ from common import *
 import json, collections, os
 from PIL import Image
 vfs=mount()
-w=zenkit.World.load(vfs.find('WORLD.ZEN').open(), zenkit.GameVersion.GOTHIC1)
-CX,CZ,R=4300,3400,4200
+w=load_world(vfs)
+CX,CZ,R=REGION_CX,REGION_CZ,REGION_R
 S=0.01
 groups=collections.defaultdict(lambda: {'p':[], 'u':[]})
 def add(tex, p3, uv3):

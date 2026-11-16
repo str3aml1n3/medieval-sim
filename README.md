@@ -1,35 +1,67 @@
 # medieval-sim
 
-Three.js medieval town simulation (arena, NPCs, music, dialogue, fighting) built from assets extracted from a local Gothic 1 install with ZenKit.
+A small medieval town simulation in the browser, built with three.js: the Old Camp arena with NPCs who duel,
+watch and cheer, voiced dialogue, sword fighting and adaptive music.
 
-Extracted assets (`export/`) are copyrighted and are git-ignored. Regenerate them with `./run.sh export_world.py`.
+It runs on assets **extracted locally from your own copy of Gothic 1** (Piranha Bytes, 2001) using
+[ZenKit](https://github.com/GothicKit/ZenKit) and [dmusic](https://github.com/GothicKit/dmusic). Those assets are
+copyrighted, so this repo contains **only code**. `export/` is git-ignored, and the GitHub Pages build publishes the
+engine without them. Play it locally.
 
-## Running
+## Quick start
 
-1. Install Python 3 and `pip install zenkit pillow numpy`.
-2. Edit `G` in `common.py` to point at your Gothic 1 `Data` folder.
-3. `./run.sh export_world.py && ./run.sh export_chars.py && ./run.sh export_wp.py`, then extract the dialogue text and audio with `export_audio.py` (it needs `export/all_lines.json`, built from `_work/Data/scripts/_compiled/OUINFO.INF`).
-4. From the repo root: `python -m http.server 8000`, then open <http://localhost:8000/web/>.
+```bash
+pip install zenkit pillow numpy
+export GOTHIC_DIR="/c/Program Files (x86)/Steam/steamapps/common/Gothic"   # your Gothic 1 folder
+./export_all.sh                                   # extracts world, characters, dialogue, audio (+ music if built)
+python -m http.server 8000 --bind 127.0.0.1       # from the repo root
+# open http://127.0.0.1:8000/web/
+```
 
-## GitHub Pages
-
-`.github/workflows/pages.yml` deploys only `web/` (the engine). The Gothic-derived assets are not
-committed or published, so the hosted page shows a "game assets not found" notice; play locally.
-Enable it under Settings > Pages > Source: GitHub Actions (private repos need a plan that supports Pages).
-
-## Music
-
-Gothic's soundtrack is DirectMusic (`.sgt`/`.sty`/`.dls`), which browsers can't play, so it is rendered to WAV
-locally with [GothicKit/dmusic](https://github.com/GothicKit/dmusic) (MIT):
-
-1. Install CMake, Ninja and a C compiler (e.g. `winget install Kitware.CMake Ninja-build.Ninja BrechtSanders.WinLibs.POSIX.UCRT`).
-2. `git clone --recursive https://github.com/GothicKit/dmusic tools/dmusic`
-3. `cmake -S tools/render -B tools/render/build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build tools/render/build`
-4. `python export_music.py` → `export/music/oc_std.wav` and `oc_fgt.wav` (seamless 2-minute loops).
-
-The game crossfades from the Old Camp theme to its fight variant during combat. Without these files it falls back
-to a small generated score. Like all extracted assets, the rendered music is never committed or published.
+For Gothic's own music, build the renderer first (needs CMake + a C compiler). See
+[docs/PIPELINE.md](docs/PIPELINE.md#export_musicpy--toolsrender--musicwav). Without it, the game plays a
+generated score.
 
 ## Controls
 
-Press **Esc** (or **P**) in game for the pause menu with the full controls legend and volume sliders.
+| Key | Action |
+|---|---|
+| W A S D / Shift | move / run |
+| Mouse | look |
+| Left click, Space | attack |
+| Right click (hold) | block |
+| F | draw / sheathe weapon |
+| E, then 1–7 | talk, pick a dialogue option |
+| M | music on/off |
+| R | get up after defeat |
+| Esc / P | pause menu (controls legend, volume, restart) |
+
+## Repository layout
+
+| Path | What |
+|---|---|
+| `common.py` | shared config (`GOTHIC_DIR`, export region) and VFS/world helpers |
+| `export_world.py` | terrain + props + textures of the arena region → `world.json` |
+| `export_chars.py` | skeleton, armors, heads, weapons → `chars.json` |
+| `export_wp.py` | waypoints → `waypoints.json` |
+| `export_lines.py` | subtitle text index from `OUINFO.INF` → `all_lines.json` |
+| `export_audio.py` | speech, barks, SFX (ADPCM → PCM) + dialogue topics → `audio/`, `dialogue.json` |
+| `export_music.py` | DirectMusic themes → looping WAVs via `tools/render` → `music/` |
+| `export_all.sh` | runs all of the above in order |
+| `run.sh` | runs one script with the right `PYTHONPATH`, filtering ZenKit exit noise |
+| `tools/render/` | `render-music.c`: C renderer on GothicKit/dmusic (dmusic itself is cloned to `tools/dmusic`, git-ignored) |
+| `web/` | the game: `index.html` + `game.js` |
+| `.github/workflows/pages.yml` | deploys `web/` to GitHub Pages (engine only, no assets) |
+| `docs/PIPELINE.md` | how extraction works, file formats, coordinate conversion, pitfalls |
+| `docs/GAME.md` | game architecture: collision, characters & animation, combat, AI, dialogue, audio, debug hooks |
+
+## GitHub Pages
+
+The workflow deploys `web/` on every push to `main` that touches it. Enable it under **Settings → Pages → Source:
+GitHub Actions**. Private repos need a plan that includes Pages. The hosted page shows a "game assets not found"
+notice, because the Gothic-derived assets are never published.
+
+## Credits
+
+Gothic © Piranha Bytes / THQ Nordic. This is a non-commercial fan project and requires an owned copy of the game.
+ZenKit and dmusic by the GothicKit contributors (MIT). three.js (MIT).

@@ -32,7 +32,7 @@ def conv(name):
     if name in done: return True
     f=vfs.find(name+'.WAV')
     if not f: return False
-    d=bytes(f.open().data) if not callable(f.open().data) else bytes(f.open().data())
+    d=read_bytes(f)
     fmt=struct.unpack('<H',d[20:22])[0]
     if fmt==17: rate,a=decode(d)
     else:
