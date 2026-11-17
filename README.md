@@ -25,26 +25,32 @@ generated score.
 
 ## Controls
 
-Gothic's layout, with the mouse turning the hero.
+Two schemes, switchable in the pause menu (Esc). **Modern** is the default; **Gothic** keeps the original's keys.
+The mouse turns the hero in both.
 
-| Key | Action |
-|---|---|
-| Mouse | turn (camera stays behind you) |
-| W / S | run forward / walk back |
-| A / D | strafe |
-| Shift (hold) | walk |
-| Alt or V | jump (forward while moving, straight up when standing) |
-| C | sneak on/off (silent: NPCs only notice what they see) |
-| Space or F | draw / sheathe weapon |
-| Left click | attack; click again as the swing ends to chain a combo (clicking too early breaks it) |
-| A / D + left click | swing left / right |
-| Right click, or S + left click | parry |
-| S (weapon drawn) | jump back |
-| T | one-handed talent: untrained / trained / master (longer combos) |
-| E, then 1–7 | talk, pick a dialogue option |
-| M | music on/off |
-| R | get up after being knocked down |
-| Esc / P | pause menu (controls, volume, brightness, mouse speed, restart) |
+| Action | Modern | Gothic |
+|---|---|---|
+| move / strafe | W S / A D | W S / A D |
+| walk | Shift (hold) | Shift (hold) |
+| jump; facing a ledge: climb up | Space | Alt or V |
+| sneak on/off | X | C |
+| draw / sheathe weapon | Ctrl | Space or F |
+| action key | left mouse or E | – |
+| focus lock on the target in front | hold the action key | – |
+| attack forward / left / right | action + W / A / D | left click / A or D + left click |
+| chain a combo | repeat as the swing ends (too early breaks it) | same |
+| parry | right click, or action + S | right click, or S + left click |
+| jump back (weapon drawn) | S | S |
+| talk | action key (weapon sheathed) | E |
+| pick a dialogue option | ↑/↓ + Enter, or 1–7 | same |
+| look back | R (hold) | – |
+| get up after a knock-down | R | R |
+| one-handed talent | T | T |
+| music on/off | M | M |
+| pause menu | Esc / P | Esc / P |
+
+NPCs' looks, hit points, strength, armour, weapons, talents and walk overlays come from Gothic's scripts.
+Damage is Gothic 1's: strength + weapon damage − the target's protection against that damage type.
 
 ## Repository layout
 

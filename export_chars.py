@@ -101,6 +101,82 @@ for wn,mrm in [('sword','ITMW_1H_SWORD_01.MRM'),('axe','ITMW_1H_AXE_01.MRM'),('m
     try:
         m=zenkit.MultiResolutionMesh.load(vfs.find(mrm).open()); out['weapons'][wn]=rigid_part(m,'ZS_RIGHTHAND'); out['weaponsLocal'][wn]=local_part(m)
     except Exception as e: print('skip weapon',wn,e)
+# --- the cast's real looks, read by running each NPC's instance in Gothic's compiled scripts (GOTHIC.DAT):
+# Mdl_SetVisualBody(npc, body, bodyTex, skin, head, headTex, teeth, armor) picks the meshes and texture variants,
+# EquipItem gives the melee weapon, Mdl_SetModelScale the build. (Same NPC ids as export_audio.py's CAST.)
+CAST_IDS=['KIRGO','THORUS','BLOODWYN','FLETCHER','SNAF','WHISTLER']
+vm=zenkit.DaedalusVm.load(os.path.join(WORK,'scripts','_compiled','GOTHIC.DAT'))
+DI=zenkit.DaedalusInstance; rec={}
+def _vis(npc,body,btex,skin,head,htex,teeth,armor): rec.update(body=body,btex=btex,skin=skin,head=head,htex=htex,teeth=teeth,armor=armor)
+def _eq(npc,item): rec.setdefault('equip',[]).append(item)
+def _scale(npc,x,y,z): rec['scale']=[round(x,3),round(y,3),round(z,3)]
+vm.register_external('Mdl_SetVisualBody',_vis,DI,str,int,int,str,int,int,int)
+vm.register_external('EquipItem',_eq,DI,int)
+vm.register_external('Mdl_SetModelScale',_scale,DI,float,float,float)
+vm.register_external('Mdl_SetModelFatness',lambda n,f: rec.update(fat=round(f,3)),DI,float)
+vm.register_external('Mdl_ApplyOverlayMds',lambda n,m: rec.update(overlay=stem(m).replace('HUMANS_','')),DI,str)
+vm.register_external('Npc_SetTalentSkill',lambda n,t,v: rec.setdefault('talent',{}).update({t:v}),DI,int,int)
+vm.register_external_default(lambda s: None)   # every other external (routines, attributes, inventory) is irrelevant here
+ITEM_SWD,ITEM_AXE,ITEM_2HD_SWD,ITEM_2HD_AXE,ITEM_KAT_NF,ITEM_KAT_FF,ITEM_CROSSBOW=16384,32768,65536,131072,2,4,1048576
+NPC_TALENT_1H,NPC_TALENT_2H=1,2
+from zenkit.daedalus.npc import NpcInstanceAttribute as ATR, DamageType as DMG
+DAMAGE_NAMES=['barrier','blunt','edge','fire','fly','magic','point','fall']   # Gothic's DAM_INDEX_* order
+def item(name): return vm.init_instance(name, zenkit.DaedalusInstanceType.ITEM)
+def protection(it): return {DAMAGE_NAMES[i]:it.get_protection(DMG(i)) for i in range(8) if it.get_protection(DMG(i))}
+def dtype(it): return DAMAGE_NAMES[(it.damage_type & -it.damage_type).bit_length()-1] if it.damage_type else 'edge'
+# the player's own gear (not scripted): guard armour and a crude sword, with Gothic's values
+out['items']={n:{'prot':protection(item(n))} for n in ['GRD_ARMOR_M']}
+_sw=item('ITMW_1H_SWORD_01'); out['items']['ITMW_1H_SWORD_01']={'dmg':_sw.damage_total,'dtype':dtype(_sw),'range':_sw.range}
+def stem(f): return os.path.splitext(f)[0].upper()
+def variant(tex,v=None,c=None):
+    # Gothic swaps texture variants by name: ..._V<n> is the body/head/teeth variant, _C<n> the skin colour
+    import re
+    if v is not None: tex=re.sub(r'_V\d+',f'_V{v}',tex,count=1)
+    if c is not None: tex=re.sub(r'_C\d+',f'_C{c}',tex,count=1)
+    return tex
+out['looks']={}
+for cid in CAST_IDS:
+    inst=next(x.name for x in vm.symbols if x.name.endswith('_'+cid) and x.type==zenkit.DaedalusDataType.INSTANCE)
+    rec.clear(); npc=vm.init_instance(inst, zenkit.DaedalusInstanceType.NPC)
+    # body: the armour's model replaces the naked body (keeping its bare-skin parts); no armour -> the body mesh itself
+    prot={}
+    if rec['armor']>=0:
+        arm=vm.init_instance(vm.get_symbol_by_index(rec['armor']).name, zenkit.DaedalusInstanceType.ITEM)
+        mdm=stem(arm.visual_change)+'.MDM'; prot=protection(arm)
+    else: mdm=stem(rec['body'])+'.MDM'
+    okey=stem(mdm).replace('HUM_','').replace('_ARMOR','')
+    if okey not in out['outfits']: out['outfits'][okey]=skin_parts(mdm)
+    hkey=stem(rec['head']).replace('HUM_HEAD_','')
+    if hkey not in out['heads']:
+        out['heads'][hkey]=rigid_part(zenkit.MorphMesh.load(vfs.find(stem(rec['head'])+'.MMB').open()).mesh,'BIP01 HEAD')
+    swap={}
+    for p in out['outfits'][okey]:
+        if p['tex'].startswith('HUM_BODY_'): swap[p['tex']]=variant(p['tex'],rec['btex'],rec['skin'])
+        elif '_V0' in p['tex']: swap[p['tex']]=variant(p['tex'],rec['btex'])
+    for p in out['heads'][hkey]:
+        if p['tex'].startswith('HUM_HEAD_'): swap[p['tex']]=variant(p['tex'],rec['htex'],rec['skin'])
+        elif p['tex'].startswith('HUM_TEETH_'): swap[p['tex']]=variant(p['tex'],rec['teeth'])
+    swap={a:b for a,b in swap.items() if a!=b and (savetex(b) or print('  missing texture',b))}
+    # equipped weapons: the melee one (in hand / at the hip or on the back) and a bow or crossbow carried on the back
+    weapon=ranged=None
+    for ii in rec.get('equip',[]):
+        wkey=vm.get_symbol_by_index(ii).name; it=item(wkey)
+        if it.main_flag==ITEM_KAT_NF and not weapon:
+            if wkey not in out['weaponsLocal']:
+                out['weaponsLocal'][wkey]=local_part(zenkit.MultiResolutionMesh.load(vfs.find(stem(it.visual)+'.MRM').open()))
+            weapon={'id':wkey,'name':it.name,'twoHanded':bool(it.flags&(ITEM_2HD_SWD|ITEM_2HD_AXE)),
+                    'dmg':it.damage_total,'dtype':dtype(it),'range':it.range}
+        elif it.main_flag==ITEM_KAT_FF and not ranged:
+            if wkey not in out['weaponsLocal']:   # bows and crossbows are morph meshes (they animate when drawn)
+                out['weaponsLocal'][wkey]=local_part(zenkit.MorphMesh.load(vfs.find(stem(it.visual)+'.MMB').open()).mesh)
+            ranged={'id':wkey,'slot':'ZS_CROSSBOW' if it.flags&ITEM_CROSSBOW else 'ZS_BOW'}
+    # fighting talent for the weapon in hand: 0 untrained, 1 trained (xHST1), 2 master (xHST2)
+    two=bool(weapon and weapon['twoHanded']); lvl=rec.get('talent',{}).get(NPC_TALENT_2H if two else NPC_TALENT_1H,0)
+    style=(('2H' if two else '1H')+'ST'+str(lvl)) if lvl else ''
+    out['looks'][cid]={'instance':inst,'outfit':okey,'head':hkey,'tex':swap,'weapon':weapon,'ranged':ranged,'scale':rec.get('scale',[1,1,1]),
+                       'fat':rec.get('fat',0),'overlay':rec.get('overlay'),'style':style,
+                       'hp':npc.get_attribute(ATR.HITPOINTS_MAX),'str':npc.get_attribute(ATR.STRENGTH),'prot':prot}
+    print('look',cid,out['looks'][cid])
 # sanity: model height
 allp=np.array([out['outfits']['GRDM'][i]['p'] for i in range(len(out['outfits']['GRDM']))],dtype=object)
 ys=[y for part in out['outfits']['GRDM'] for y in part['p'][1::3]]

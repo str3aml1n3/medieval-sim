@@ -9,7 +9,7 @@ from PIL import Image
 
 vfs = mount()
 os.makedirs('export/ui', exist_ok=True)
-TEXTURES = ['BAR_BACK', 'BAR_HEALTH', 'DLG_CONVERSATION',
+TEXTURES = ['BAR_BACK', 'BAR_HEALTH', 'DLG_CONVERSATION', 'DLG_CHOICE',
             'SKYDAY_LAYER0_A0', 'SKYDAY_LAYER1_A0', 'UNSUN5']  # day sky: cloud layer, sky layer, sun
 FONTS = ['FONT_OLD_10_WHITE', 'FONT_OLD_10_WHITE_HI', 'FONT_OLD_20_WHITE', 'FONT_OLD_20_WHITE_HI']
 

@@ -255,6 +255,7 @@ function segCast(a, b) {
 }
 const GRAVITY = 20, JUMP_GRAVITY = 14;
 function settle(e, dt) {
+  if (e.act && e.act.type === 'climb') return;
   const g = groundAt(e.pos.x, e.pos.z, e.pos.y + 0.2), gi = gTri;
   if (g !== null) { e.groundY = g; if (gi >= 0) { e.groundN.copy(tris[gi].n); e.lightTarget.copy(tris[gi].col); } }
   else e.groundY = e.pos.y - 9;
@@ -367,6 +368,25 @@ function skinGeo(p) {
   if (p.si) { g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(p.si, 4)); g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(p.sw, 4)); }
   g.computeVertexNormals(); return g;
 }
+// Mdl_SetModelFatness: each vertex moves along its (smooth) normal by fatness * 0.5 cm, as in Gothic's engine.
+// Applied to the bind-pose geometry; normals are averaged over vertices that share a position so seams stay closed.
+function fattenGeo(p, fat) {
+  const g = skinGeo(p); if (!fat) return g;
+  const pos = g.attributes.position, n = pos.count, acc = new Map(), keys = new Array(n);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), fn = new THREE.Vector3();
+  for (let i = 0; i < n; i++) keys[i] = Math.round(pos.getX(i) * 1e4) + ',' + Math.round(pos.getY(i) * 1e4) + ',' + Math.round(pos.getZ(i) * 1e4);
+  for (let i = 0; i < n; i += 3) {
+    a.fromBufferAttribute(pos, i); b.fromBufferAttribute(pos, i + 1); c.fromBufferAttribute(pos, i + 2);
+    fn.subVectors(c, b).cross(b.clone().sub(a)); // area-weighted face normal
+    for (let k = 0; k < 3; k++) { const v = acc.get(keys[i + k]) || acc.set(keys[i + k], new THREE.Vector3()).get(keys[i + k]); v.add(fn); }
+  }
+  const d = fat * 0.005; // 0.5 cm per unit of fatness, in metres
+  for (let i = 0; i < n; i++) {
+    const v = acc.get(keys[i]).clone(); if (v.lengthSq() < 1e-12) continue; v.normalize();
+    pos.setXYZ(i, pos.getX(i) + v.x * d, pos.getY(i) + v.y * d, pos.getZ(i) + v.z * d);
+  }
+  g.computeVertexNormals(); return g;
+}
 const geoCache = new Map();
 const gGeo = p => { if (!geoCache.has(p)) geoCache.set(p, skinGeo(p)); return geoCache.get(p); };
 let STAND_Y = 0.977; // root height of Gothic's standing pose (S_RUN), set below
@@ -388,9 +408,13 @@ class Char {
     this.root.updateMatrixWorld(true);
     this.skel = new THREE.Skeleton(this.bones);
     this.mats = [];
+    // `tex` maps a mesh's default texture to this character's variant (Gothic's body/head/teeth _V and skin _C numbers)
+    const swap = o.tex || {};
+    if (o.scale) this.body.scale.fromArray(o.scale);
+    const geo = p => (o.fat ? fattenGeo(p, o.fat) : gGeo(p));
     for (const p of [...chars.outfits[o.outfit], ...(chars.heads[o.head] || [])]) {
-      const mat = new THREE.MeshLambertMaterial({ map: getTex(p.tex), alphaTest: 0.4 }); this.mats.push(mat);
-      const m = new THREE.SkinnedMesh(gGeo(p), mat); m.frustumCulled = false; this.body.add(m);
+      const mat = new THREE.MeshLambertMaterial({ map: getTex(swap[p.tex] || p.tex), alphaTest: 0.4 }); this.mats.push(mat);
+      const m = new THREE.SkinnedMesh(geo(p), mat); m.frustumCulled = false; this.body.add(m);
       // the mesh's world matrix must be current *before* binding, or every bone pivots ~1 m away from its joint
       this.root.updateMatrixWorld(true); m.bind(this.skel, m.matrixWorld);
     }
@@ -398,9 +422,14 @@ class Char {
     this.weapon = new THREE.Group();
     for (const p of (chars.weaponsLocal && chars.weaponsLocal[o.weapon]) || []) {
       const mat = new THREE.MeshLambertMaterial({ map: getTex(p.tex), alphaTest: 0.4, side: THREE.DoubleSide }); this.mats.push(mat);
-      this.weapon.add(new THREE.Mesh(gGeo(p), mat));
+      this.weapon.add(new THREE.Mesh(geo(p), mat));
     }
     this.slot(false);
+    // a bow or crossbow stays on the back (ZS_BOW / ZS_CROSSBOW); there is no ranged combat
+    if (o.ranged) for (const p of (chars.weaponsLocal && chars.weaponsLocal[o.ranged.id]) || []) {
+      const mat = new THREE.MeshLambertMaterial({ map: getTex(p.tex), alphaTest: 0.4, side: THREE.DoubleSide }); this.mats.push(mat);
+      this.bones[boneIdx[o.ranged.slot]].add(new THREE.Mesh(geo(p), mat));
+    }
     this.cur = new Float32Array(NB * 4); this.snap = new Float32Array(NB * 4);
     rest.forEach((r, i) => r.q.toArray(this.cur, i * 4));
     this.rootY = 1; this.snapY = 1; this.blendT = 0; this.blendDur = 0; this.base = null; this.over = null;
@@ -408,11 +437,18 @@ class Char {
     this.shadow = new THREE.Mesh(blobGeo, new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
     this.shadow.renderOrder = 1; this.groundY = 0; this.groundN = new THREE.Vector3(0, 1, 0); scene.add(this.shadow);
   }
-  slot(inHand) { this.bones[boneIdx[inHand ? 'ZS_RIGHTHAND' : 'ZS_SWORD']].add(this.weapon); }
+  // a two-hander is sheathed on the back (ZS_LONGSWORD) like in Gothic, a one-hander at the hip
+  // Gothic's clip for this character: a two-hander plays the 2H version of a 1H clip; the talent's style overlay
+  // (1HST1/2, 2HST1/2) and the NPC's walk overlay (Humans_Militia / Humans_Relaxed) replace base clips where they have one
+  clip(name) {
+    const look = n => (this.style && CLIPS[this.style + ':' + n]) || (this.ovl && CLIPS[this.ovl + ':' + n]) || CLIPS[n];
+    return (this.twoHanded && look(name.replace(/1H/g, '2H'))) || look(name);
+  }
+  slot(inHand) { this.bones[boneIdx[inHand ? 'ZS_RIGHTHAND' : this.twoHanded ? 'ZS_LONGSWORD' : 'ZS_SWORD']].add(this.weapon); }
   get fwd() { return new THREE.Vector3(-Math.sin(this.heading), 0, -Math.cos(this.heading)); }
   // base layer: one full-body clip, cross-faded from the previous pose
   play(name, { loop = true, rate = 1, rev = false, blend = 0.15, rm = false, restart = false, fixY = false } = {}) {
-    const clip = clipOf(name, this.style); if (!clip) { console.warn('missing clip', name); return false; }
+    const clip = this.clip(name); if (!clip) { console.warn('missing clip', name); return false; }
     const b = this.base;
     if (!restart && b && b.clip === clip && b.rev === rev && b.loop === loop) { b.rate = rate; return true; }
     this.snap.set(this.cur); this.snapY = this.rootY; this.blendT = 0; this.blendDur = blend;
@@ -420,7 +456,7 @@ class Char {
     return true;
   }
   // overlay layer: a partial clip (upper body etc.) mixed on top, faded in and out
-  overlay(name, { rate = 1, rev = false } = {}) { const clip = clipOf(name, this.style); if (clip) this.over = { clip, t: 0, rate, rev, loop: false }; }
+  overlay(name, { rate = 1, rev = false } = {}) { const clip = this.clip(name); if (clip) this.over = { clip, t: 0, rate, rev, loop: false }; }
   frame() { return this.base ? frameAt(this.base) : 0; }
   done() { return !this.base || ended(this.base); }
   update(dt) {
@@ -428,7 +464,7 @@ class Char {
     if (b) { b.prevF = frameAt(b); b.t += dt * b.rate; }
     rest.forEach((r, i) => r.q.toArray(this.cur, i * 4));
     let y = this.rootY;
-    if (b) { const ry = sample(b.clip, frameAt(b), b.loop, this.cur); if (ry !== null) y = b.fixY ? STAND_Y : ry; }
+    if (b) { const ry = sample(b.clip, frameAt(b), b.loop, this.cur); if (ry !== null) y = b.fixY ? STAND_Y : b.k ? STAND_Y + (ry - STAND_Y) * b.k : ry; }
     if (this.blendT < this.blendDur) {
       this.blendT += dt; const w = smooth(Math.min(1, this.blendT / this.blendDur));
       for (let i = 0; i < NB; i++) THREE.Quaternion.slerpFlat(this.cur, i * 4, this.snap, i * 4, this.cur, i * 4, w);
@@ -446,7 +482,9 @@ class Char {
     }
     this.rootY = y;
     for (let i = 0; i < NB; i++) this.bones[i].quaternion.fromArray(this.cur, i * 4);
-    this.bones[0].position.set(0, y, 0);
+    // climbing: the body visibly travels up and over the edge while pos stays at the foot of the wall until the end
+    if (b && b.kz) { const [rx, rz] = rootXZ(b.clip, frameAt(b)); this.bones[0].position.set(rx, y, rz * b.kz); }
+    else this.bones[0].position.set(0, y, 0);
     this.light.lerp(this.lightTarget, Math.min(1, dt * 4));
     const k = clamp(this.light.r * 1.7, 0.3, 1.25), k2 = clamp(this.light.g * 1.7, 0.3, 1.25), k3 = clamp(this.light.b * 1.7, 0.3, 1.25);
     for (const m of this.mats) m.color.setRGB(k, k2, k3);
@@ -524,30 +562,41 @@ function poseTick(c) {
 }
 
 // ---------------------------------------------------------------- entities
-const W_DMG = { sword: 15, axe: 18, mace: 16, hammer: 14 };
+// Gothic 1 melee damage: max(strength + weapon damage - target's armour protection against that damage type, 0).
+// The player is a custom guard: Gothic's guard armour and crude sword, with a seasoned guard's strength and health.
+const ITEMS = chars.items || {};
+const PLAYER_ARMOR = (ITEMS.GRD_ARMOR_M || {}).prot || { edge: 55, blunt: 55 };
+const PLAYER_SWORD = ITEMS.ITMW_1H_SWORD_01 || { dmg: 20, dtype: 'edge', range: 100 };
+const reachOf = range => 1.1 + (range || 100) / 100; // centre-to-centre: two bodies plus the weapon's range (cm)
 const entities = [];
 const PLAYER_START = () => (WP.OCR_OUTSIDE_ARENA || new THREE.Vector3(49.7, -9.5, -42.4)).clone().add(new THREE.Vector3(0, 0.5, 0));
-const player = new Char({ name: 'You', outfit: 'GRDM', head: 'FIGHTER', weapon: 'sword', isPlayer: true, hp: 150, maxHp: 150, str: 25, wdmg: W_DMG.sword, prot: 25, style: store.get('style', '') });
+const player = new Char({ name: 'You', outfit: 'GRDM', head: 'FIGHTER', weapon: 'sword', isPlayer: true, hp: 220, maxHp: 220, str: 70,
+  wdmg: PLAYER_SWORD.dmg, dtype: PLAYER_SWORD.dtype, reach: reachOf(PLAYER_SWORD.range), prot: PLAYER_ARMOR, style: store.get('style', '') });
 player.pos.copy(PLAYER_START()); player.heading = Math.PI * 0.75; entities.push(player);
 const wpFix = (name, dy = 0.6) => { const w = WP[name]; return w ? w.clone().add(new THREE.Vector3(0, dy, 0)) : new THREE.Vector3(40, -9, -34); };
 // Arena floor = centre of the OCR_ARENA_01..09 ring. (OCR_ARENABATTLE is the fighters' room *under* the arena.)
 const ring = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => WP['OCR_ARENA_0' + i]).filter(Boolean);
 const PIT = ring.length ? ring.reduce((a, b) => a.clone().add(b)).divideScalar(ring.length).add(new THREE.Vector3(0, 0.6, 0)) : wpFix('OCR_ARENA_01');
+// Looks, hit points, strength, armour, weapons, fighting talent and walk overlay come from Gothic's scripts via
+// chars.looks (export_chars.py); castCfg only places the scene. `skill` is how well the AI fights.
 // Fighting skill: Gothic's 1H talent picks the animation set (untrained / HUMANS_1HST1 / HUMANS_1HST2) and with it the
 // combo length; `skill` is how reliably the AI parries and chains combos. Damage = strength + weapon - armour.
 const castCfg = {
-  KIRGO: { outfit: 'SLDM', head: 'FIGHTER', weapon: 'sword', pos: PIT.clone().add(new THREE.Vector3(-1.8, 0, 0)), duty: 'duel', hp: 160, str: 35, prot: 20, style: '1HST1', skill: 0.5 },
-  WHISTLER: { outfit: 'STTM', head: 'THIEF', weapon: 'axe', pos: PIT.clone().add(new THREE.Vector3(1.8, 0, 0)), duty: 'duel', hp: 120, str: 30, prot: 10, style: '', skill: 0.35 },
-  THORUS: { outfit: 'GRDM', head: 'BALD', weapon: 'sword', pos: wpFix('OCR_ARENA_BARONS_HUT'), duty: 'guard', guard: true, hp: 400, str: 80, prot: 45, style: '1HST2', skill: 0.85 },
-  BLOODWYN: { outfit: 'SLDM', head: 'FATBALD', weapon: 'mace', pos: wpFix('OCR_OUTSIDE_ARENA_HANGAROUND'), duty: 'watch', guard: true, hp: 280, str: 60, prot: 40, style: '1HST2', skill: 0.7 },
-  FLETCHER: { outfit: 'STTM', head: 'PSIONIC', weapon: 'hammer', pos: wpFix('OCR_OUTSIDE_ARENA_01'), duty: 'watch', guard: true, hp: 200, str: 45, prot: 30, style: '1HST1', skill: 0.55 },
-  SNAF: { outfit: 'VLKM', head: 'PONY', weapon: 'mace', pos: wpFix('OCR_OUTSIDE_ARENA_BENCH1'), duty: 'idle', hp: 60, str: 15, prot: 5, style: '', skill: 0.2 },
+  KIRGO: { pos: PIT.clone().add(new THREE.Vector3(-1.8, 0, 0)), duty: 'duel', skill: 0.5 },
+  WHISTLER: { pos: PIT.clone().add(new THREE.Vector3(1.8, 0, 0)), duty: 'duel', skill: 0.35 },
+  THORUS: { pos: wpFix('OCR_ARENA_BARONS_HUT'), duty: 'guard', guard: true, skill: 0.85 },
+  BLOODWYN: { pos: wpFix('OCR_OUTSIDE_ARENA_HANGAROUND'), duty: 'watch', guard: true, skill: 0.7 },
+  FLETCHER: { pos: wpFix('OCR_OUTSIDE_ARENA_01'), duty: 'watch', guard: true, skill: 0.55 },
+  SNAF: { pos: wpFix('OCR_OUTSIDE_ARENA_BENCH1'), duty: 'idle', skill: 0.2 },
 };
 const npcs = [];
+if (!chars.looks) console.warn('export/chars.json has no NPC looks: re-run ./run.sh export_chars.py');
 for (const c of dlg.cast) {
-  const cfg = castCfg[c.id]; if (!cfg) continue;
-  const e = new Char({ name: c.name, outfit: cfg.outfit, head: cfg.head, weapon: cfg.weapon, cast: c, duty: cfg.duty, guard: !!cfg.guard,
-    hp: cfg.hp, maxHp: cfg.hp, str: cfg.str, wdmg: W_DMG[cfg.weapon], prot: cfg.prot, style: cfg.style, skill: cfg.skill });
+  const cfg = castCfg[c.id], look = chars.looks && chars.looks[c.id]; if (!cfg || !look) continue;
+  const w = look.weapon || { id: 'sword', twoHanded: false, dmg: 0, dtype: 'blunt', range: 100 };
+  const e = new Char({ name: c.name, outfit: look.outfit, head: look.head, tex: look.tex, scale: look.scale, fat: look.fat, ovl: look.overlay,
+    weapon: w.id, twoHanded: w.twoHanded, ranged: look.ranged, cast: c, duty: cfg.duty, guard: !!cfg.guard,
+    hp: look.hp, maxHp: look.hp, str: look.str, wdmg: w.dmg, dtype: w.dtype, reach: reachOf(w.range), prot: look.prot || {}, style: look.style, skill: cfg.skill });
   e.pos.copy(cfg.pos); e.home = cfg.pos.clone(); e.heading = Math.atan2(-(PIT.x - e.pos.x), -(PIT.z - e.pos.z));
   entities.push(e); npcs.push(e);
 }
@@ -573,7 +622,7 @@ function bark(e, name, delay = 0) {
 }
 function toggleWeapon(c) {
   if (c.drawing || c.downed || (c.act && c.act.type !== 'parade')) return;
-  const draw = !c.drawn, clip = clipOf('T_MOVE_2_1HMOVE', c.style);
+  const draw = !c.drawn, clip = c.clip('T_MOVE_2_1HMOVE');
   const sw = clip && clip.ev.set_fight_mode ? clip.ev.set_fight_mode[0] / clip.fps : 0.2; // when the hand reaches the hilt
   c.drawing = { t: 0, draw, at: draw ? sw : (clip.n - 1) / clip.fps - sw, len: (clip.n - 1) / clip.fps };
   c.overlay('T_MOVE_2_1HMOVE', { rev: !draw });
@@ -608,7 +657,7 @@ function attackTick(c, a) {
   if (!a.hit && f >= opt) { a.hit = true; strike(c, a.dir); }
   if (!c.isPlayer && !a.decided && c.hostile) {
     const [ws] = winOf(a);
-    if (f >= ws) { a.decided = true; if (Math.random() < c.skill && dist2(c, c.hostile) < REACH + 0.4) a.queued = Math.random() < 0.75 ? 'F' : pick(['L', 'R']); }
+    if (f >= ws) { a.decided = true; if (Math.random() < c.skill && dist2(c, c.hostile) < (c.reach || REACH) + 0.4) a.queued = Math.random() < 0.75 ? 'F' : pick(['L', 'R']); }
   }
   if (f >= end - 0.01 || c.done()) {
     const q = a.queued;
@@ -627,10 +676,58 @@ function parade(c) {
 // standing (T_STAND_2_JUMPUP -> S_JUMPUP -> S_FALLDN). The arc is physics; the clips' own root height is ignored.
 function jump(c) {
   if (c.air || c.downed || c.drawing || c.act || c.vy !== 0) return;
+  const ledge = findLedge(c); if (ledge) return startClimb(c, ledge);
   const fwd = c.mv.f > 0, sp = fwd ? (c.gait === 'run' ? 5 : 3.2) : 0, h = c.heading;
   c.air = true; c.vy = fwd ? 4.6 : 5.0;
   c.act = { type: 'jump', id: ++actId, t: 0, fwd, vx: -Math.sin(h) * sp, vz: -Math.cos(h) * sp };
   c.play(fwd ? 'T_RUNL_2_JUMP' : 'T_STAND_2_JUMPUP', { loop: false, blend: 0.08, fixY: true });
+}
+// Climbing (Gothic: the jump key in front of a ledge). The ledge height picks Gothic's own sequence: low (waist),
+// mid (chest) or high (jump up, hang on the edge, pull up). Each sequence's root rises by a fixed amount, so its clips
+// are scaled to the real height; at the end the hero is put on top where the last clip leaves the body.
+const CLIMBS = [
+  { max: 1.2, seq: ['T_STAND_2_JUMPUPLOW', 'S_JUMPUPLOW', 'T_JUMPUPLOW_2_STAND'] },
+  { max: 1.85, seq: ['T_STAND_2_JUMPUPMID', 'S_JUMPUPMID', 'T_JUMPUPMID_2_STAND'] },
+  { max: 2.75, seq: ['T_STAND_2_JUMPUP', 'T_JUMP_2_HANG', 'S_HANG', 'T_HANG_2_STAND'] },
+].filter(k => k.seq.every(n => CLIPS[n]));
+for (const k of CLIMBS) { const r = CLIPS[k.seq[k.seq.length - 1]].root, n = r.length; k.rise = r[n - 2] - STAND_Y; k.fwd = -r[n - 1]; }
+const CLIMB_MIN = 0.55; // lower than this is a step the hero just walks up
+const _v3 = (x, y, z) => new THREE.Vector3(x, y, z);
+function findLedge(c) {
+  if (!CLIMBS.length) return null;
+  const f = c.fwd, y0 = c.pos.y, maxH = CLIMBS[CLIMBS.length - 1].max;
+  for (const d of [0.5, 0.65, 0.8, 0.95]) {
+    const x = c.pos.x + f.x * d, z = c.pos.z + f.z * d;
+    const top = groundAt(x, z, y0 + maxH, 0); if (top === null) continue;
+    const H = top - y0; if (H < CLIMB_MIN) continue; // still open floor here: look a bit further ahead
+    // room to stand up on top, and nothing overhead on the way up
+    if (segCast(_v3(x, top + 0.15, z), _v3(x, top + 1.75, z)) !== null) return null;
+    if (segCast(_v3(c.pos.x, y0 + 1.2, c.pos.z), _v3(c.pos.x, top + 1.8, c.pos.z)) !== null) return null;
+    // where to stand afterwards: a little past the edge, on that same top surface
+    for (const dl of [d + 0.3, d + 0.15]) {
+      const lx = c.pos.x + f.x * dl, lz = c.pos.z + f.z * dl, g = groundAt(lx, lz, top + 0.3, 0.6);
+      if (g !== null && Math.abs(g - top) < 0.3) return { H: g - y0, top: g, dist: dl, x: lx, z: lz, kind: CLIMBS.find(k => H <= k.max) };
+    }
+    return null;
+  }
+  return null;
+}
+function startClimb(c, L) {
+  const k = L.kind; c.mv.f = c.mv.s = 0; c.over = null;
+  c.act = { type: 'climb', id: ++actId, t: 0, i: 0, seq: k.seq, H: L.H, k: L.H / k.rise, kz: L.dist / k.fwd, land: _v3(L.x, L.top, L.z), hold: 0 };
+  climbClip(c, c.act);
+}
+function climbClip(c, a) {
+  c.play(a.seq[a.i], { loop: false, restart: true, blend: a.i ? 0.06 : 0.12 });
+  c.base.k = a.k; c.base.kz = a.kz;
+}
+function climbTick(c, a, dt) {
+  if (!c.done()) return;
+  if (a.seq[a.i] === 'S_HANG' && (a.hold += dt) < 0.25) return; // a moment hanging on the edge
+  if (++a.i < a.seq.length) return climbClip(c, a);
+  // on top: move the hero to where the clip left the body and lower the pose by the same amount, so nothing jumps
+  c.pos.copy(a.land); c.vy = 0; c.lastGood = a.land.y; c.rootY -= a.H; c.act = null;
+  c.base.kz = 0; c.play('S_RUN', { blend: 0.15 }); sfx.step(c, 0.5);
 }
 function jumpTick(c, a, dt) {
   if (a.vx || a.vz) { const x = c.pos.x, z = c.pos.z; moveBy(c, a.vx * dt, a.vz * dt); if (c.pos.x === x && c.pos.z === z) a.vx = a.vz = 0; }
@@ -643,7 +740,7 @@ function jumpBack(c) {
 function strike(att, dir) {
   for (const t of entities) {
     if (t === att || t.downed) continue;
-    const d = dist2(att, t); if (d > REACH) continue;
+    const d = dist2(att, t); if (d > (att.reach || REACH)) continue;
     if (att.fwd.dot(dirTo(att, t)) < (dir === 'F' ? 0.55 : 0.1)) continue; // side swings sweep a wider arc
     hurt(t, att);
   }
@@ -654,7 +751,7 @@ function hurt(t, att) {
   if (t.act && t.act.type === 'parade' && facing > 0.4 && t.act.t < 0.95) {
     sfx.clash(t); if (att.act && att.act.type === 'attack') att.act.failed = true; return;
   }
-  const dmg = Math.max(1, att.str + att.wdmg - t.prot);
+  const dmg = Math.max(0, att.str + att.wdmg - ((t.prot && t.prot[att.dtype || 'edge']) || 0));
   sfx.hit(t);
   if (t.cast && Math.random() < 0.6) bark(t, pick(['AARGH_1', 'AARGH_2', 'AARGH_3'])); else if (t.isPlayer) playAt(pick(['SVM_15_AARGH_1', 'SVM_15_AARGH_2']), at(t, 1.6), 1);
   t.hp -= dmg;
@@ -695,6 +792,7 @@ function tickAction(c, dt) {
   a.t += dt;
   if (a.type === 'attack') return attackTick(c, a);
   if (a.type === 'jump') return jumpTick(c, a, dt);
+  if (a.type === 'climb') return climbTick(c, a, dt);
   if (a.type === 'fall') return;
   if (a.type === 'down') {
     if (a.phase === 'fall') { if (!a.snd && c.frame() > 44) { a.snd = true; sfx.fall(c); } if (c.done()) { a.phase = 'lie'; a.t = 0; c.play('S_WOUNDED', { blend: 0.3 }); } }
@@ -707,11 +805,20 @@ function tickAction(c, dt) {
 
 // ---------------------------------------------------------------- input
 const keys = {}; let pitch = 0.22, lockedUI = false, sneakOn = false, rmb = false;
+// two control schemes: 'gothic' (the original's keys) and 'modern' (Space jumps, Ctrl draws, X sneaks, R looks back,
+// right mouse locks the focus on an enemy). Picked in the pause menu, remembered per browser.
+let scheme = store.get('controls', 'modern') === 'gothic' ? 'gothic' : 'modern'; // modern is the default ('controls' replaces an older key that always stored 'gothic')
+let lockOn = null; // modern scheme: the NPC the hero stays turned towards
 let sens = store.get('sens', 1);
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
-addEventListener('keydown', e => { if (MOVE_KEYS.includes(e.code) || e.code === 'Space' || e.key === 'Alt') e.preventDefault(); if (!e.repeat) onKey(e); keys[e.code] = true; });
-addEventListener('keyup', e => { keys[e.code] = false; });
-addEventListener('blur', () => { for (const k in keys) keys[k] = false; rmb = false; });
+addEventListener('keydown', e => {
+  if (MOVE_KEYS.includes(e.code) || e.code === 'Space' || e.key === 'Alt' || (started && !paused && !lockedUI && (e.key === 'Control' || e.ctrlKey))) e.preventDefault();
+  if (!e.repeat) onKey(e); keys[e.code] = true;
+});
+// Ctrl is the draw key in the modern scheme, and browsers don't let a page block Ctrl+W: ask before the tab closes
+addEventListener('beforeunload', e => { if (started && scheme === 'modern') { e.preventDefault(); e.returnValue = ''; } });
+addEventListener('keyup', e => { keys[e.code] = false; if (e.code === 'KeyE') actionRelease(); });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; rmb = false; lmb = false; lockOn = null; });
 function lockPointer() {
   // raw (unaccelerated) mouse deltas where supported; avoids OS acceleration making turning inconsistent
   try { const r = renderer.domElement.requestPointerLock({ unadjustedMovement: true }); if (r && r.catch) r.catch(() => renderer.domElement.requestPointerLock()); }
@@ -723,17 +830,45 @@ addEventListener('mousemove', e => {
   if (!document.pointerLockElement || lockedUI || paused) return;
   const mx = e.movementX, my = e.movementY;
   if (Math.abs(mx) > 300 || Math.abs(my) > 300) return; // Chrome on Windows sometimes reports huge bogus jumps under pointer lock
-  if (!player.downed) player.heading -= mx * 0.0022 * sens;
+  if (!player.downed && !lockOn) player.heading -= mx * 0.0022 * sens; // locked on: the hero keeps facing the target
   pitch = clamp(pitch + my * 0.0016 * sens, -0.35, 1.1);
 });
 const dirKeys = () => (keys.KeyA || keys.ArrowLeft ? 'L' : keys.KeyD || keys.ArrowRight ? 'R' : keys.KeyS || keys.ArrowDown ? 'B' : 'F');
 addEventListener('mousedown', e => {
   if (!document.pointerLockElement || lockedUI || paused) return;
-  if (e.button === 0) actionInput(dirKeys());
+  // Gothic scheme: left = attack. Modern: left = lock focus on a target (E is the action key there). Right = parry in both.
+  if (e.button === 0) { if (scheme === 'modern') { lmb = true; actionPress(); } else actionInput(dirKeys()); }
   if (e.button === 2) { rmb = true; if (player.drawn) parade(player); }
 });
-addEventListener('mouseup', e => { if (e.button === 2) rmb = false; });
+addEventListener('mouseup', e => { if (e.button === 2) rmb = false; if (e.button === 0) { lmb = false; actionRelease(); } });
 addEventListener('contextmenu', e => e.preventDefault());
+const LOCK_RANGE = 15;
+// Modern scheme: E is the action key (talk; attack with the weapon drawn). Holding left mouse keeps the focus on a
+// target, and an attack needs both: left mouse held + E
+let lmb = false;
+// Modern scheme, Gothic-style action key: left mouse OR E. Holding it locks the focus on a target; with the weapon
+// drawn the movement keys then fight instead of moving: W attacks, A/D swing left/right, S parries.
+// Pressed with the weapon sheathed it talks to the NPC nearby.
+const actionHeld = () => scheme === 'modern' && (lmb || !!keys.KeyE);
+const ACTION_DIRS = { KeyW: 'F', ArrowUp: 'F', KeyA: 'L', ArrowLeft: 'L', KeyD: 'R', ArrowRight: 'R', KeyS: 'B', ArrowDown: 'B' };
+function actionPress() {
+  const p = player; if (p.downed) return;
+  acquireLock();
+  if (!p.drawn && !p.drawing) { const n = nearestTalker(); if (n) openMenu(n); return; }
+  const held = Object.keys(ACTION_DIRS).find(k => keys[k]); if (held) actionInput(ACTION_DIRS[held]); // direction already down
+}
+function actionRelease() { if (!actionHeld()) lockOn = null; }
+function toggleLock() { if (lockOn) lockOn = null; else acquireLock(); }
+function acquireLock() {
+  // the NPC in focus, else the nearest one roughly in front
+  let best = player.focus, bs = 1e9;
+  if (!best) for (const n of npcs) {
+    if (n.downed) continue; const d = dist2(player, n); if (d > LOCK_RANGE) continue;
+    const dot = player.fwd.dot(dirTo(player, n)); if (dot < 0.3) continue;
+    const s = d * (2.2 - dot); if (s < bs) { bs = s; best = n; }
+  }
+  lockOn = best || null;
+}
 function actionInput(dir) {
   const p = player; if (p.downed) return;
   if (!p.drawn && !p.drawing) { if (!convo) toggleWeapon(p); return; }
@@ -746,7 +881,12 @@ function actionInput(dir) {
 }
 // ---- start screen + pause menu (controls legend, volumes, mouse, restart)
 let started = false, paused = false;
-for (const id of ['startLegend', 'pauseLegend']) $(id).appendChild($('legendTpl').content.cloneNode(true));
+function showLegends() {
+  for (const id of ['startLegend', 'pauseLegend']) $(id).replaceChildren($(scheme === 'modern' ? 'legendModern' : 'legendTpl').content.cloneNode(true));
+}
+function setScheme(v) { scheme = v; store.set('controls', v); lockOn = null; $('scheme').value = v; showLegends(); }
+$('scheme').addEventListener('change', e => setScheme(e.target.value));
+setScheme(scheme);
 function setPaused(v) {
   paused = v; $('pause').style.display = v ? 'flex' : 'none';
   if (v) { for (const k in keys) keys[k] = false; rmb = false; if (document.pointerLockElement) document.exitPointerLock(); $('btnResume').focus(); }
@@ -766,7 +906,7 @@ const STYLE_NAMES = { '': 'untrained', '1HST1': 'trained', '1HST2': 'master' };
 function setStyle(s) { player.style = s; store.set('style', s); $('style').textContent = STYLE_NAMES[s]; }
 setStyle(player.style in STYLE_NAMES ? player.style : '');
 function restartArena() {
-  if (convo) closeConvo();
+  if (convo) closeConvo(); lockOn = null;
   for (const c of entities) {
     Object.assign(c, { downed: false, act: null, drawing: null, hostile: null, vy: 0, air: false, fallT: 0, hp: c.maxHp, over: null, lookT: 0, warn: 0, weapT: 0 });
     c.drawn = false; c.slot(false); c.play(c.isPlayer ? 'S_RUN' : 'S_RUN', { blend: 0 });
@@ -786,24 +926,26 @@ function nearestTalker() {
   for (const n of npcs) { if (n.downed || n.hostile || n.act) continue; const d = dist2(n, player); if (d < bd) { bd = d; b = n; } }
   return b;
 }
-function topicLabel(t) { const pl = t.lines.find(l => l.who === 'player') || t.lines[0]; const s = pl.text.replace(/\s+/g, ' '); return s.length > 56 ? s.slice(0, 54) + '…' : s; }
+function topicLabel(t) { const pl = t.lines.find(l => l.who === 'player') || t.lines[0]; const s = pl.text.replace(/\s+/g, ' '); return s.length > 120 ? s.slice(0, 118) + '…' : s; }
 function openMenu(n) {
   convo = { npc: n, state: 'menu' }; lockedUI = true; document.exitPointerLock(); n.talking = false;
-  const m = $('menu'); m.style.display = 'block'; m.innerHTML = '';
-  const h = document.createElement('h3'); m.appendChild(h); setText(h, [[n.name + ' — ' + n.cast.role, F10HI]]);
+  const m = $('menu'); m.style.display = 'block'; m.innerHTML = ''; $('hp').style.visibility = 'hidden';
   const opts = n.cast.topics.map(t => ({ label: topicLabel(t), run: () => playTopic(n, t) }));
   if (n.duty !== 'idle') opts.push({ label: '⚔ I challenge you to a fight!', run: () => { closeConvo(); n.hostile = player; bark(n, 'YOUASKEDFORIT'); } });
   opts.push({ label: 'Goodbye', run: closeConvo });
   n.cast.topics.forEach(t => t.lines.forEach(l => loadSound(l.wav)));
-  // Gothic marks the hovered choice with the highlighted font
+  // Gothic's choice box: plain lines across the bottom of the screen, the selected one in the highlighted font
   opts.forEach((o, i) => {
-    const d = document.createElement('div'), label = (i + 1) + '. ' + o.label; m.appendChild(d); d.onclick = o.run;
-    setText(d, [[label, F10]]); d.onmouseenter = () => setText(d, [[label, F10HI]]); d.onmouseleave = () => setText(d, [[label, F10]]);
+    const d = document.createElement('div'); m.appendChild(d); o.el = d; d.onclick = o.run; d.onmouseenter = () => selectOpt(i);
   });
-  convo.opts = opts;
+  convo.opts = opts; convo.sel = -1; selectOpt(0);
+}
+function selectOpt(i) {
+  const o = convo.opts; convo.sel = (i + o.length) % o.length;
+  o.forEach((x, k) => setText(x.el, [[x.label, k === convo.sel ? F10HI : F10]]));
 }
 function playTopic(n, t) {
-  $('menu').style.display = 'none'; convo.state = 'talk'; let i = 0;
+  $('menu').style.display = 'none'; $('hp').style.visibility = ''; convo.state = 'talk'; let i = 0;
   const next = () => {
     if (!convo || convo.npc !== n) return;
     if (i >= t.lines.length) { setText($('sub'), ''); n.talking = false; return openMenu(n); }
@@ -813,33 +955,48 @@ function playTopic(n, t) {
   };
   next();
 }
-function closeConvo() { if (convo) convo.npc.talking = false; convo = null; lockedUI = false; $('menu').style.display = 'none'; setText($('sub'), ''); if (voiceAudio && voiceAudio.isPlaying) { voiceAudio.onEnded = () => {}; voiceAudio.stop(); } lockPointer(); }
+function closeConvo() { if (convo) convo.npc.talking = false; convo = null; lockedUI = false; $('menu').style.display = 'none'; $('hp').style.visibility = ''; setText($('sub'), ''); if (voiceAudio && voiceAudio.isPlaying) { voiceAudio.onEnded = () => {}; voiceAudio.stop(); } lockPointer(); }
 const flash = t => showMsg(t, 2000);
 function onKey(e) {
   if (!started) return;
   if (paused) { if (e.code === 'Escape' || e.code === 'KeyP') setPaused(false); return; }
   if (e.code === 'KeyP' && !convo) return setPaused(true);
-  if (convo && convo.state === 'menu') { const i = parseInt(e.key) - 1; if (convo.opts[i]) convo.opts[i].run(); if (e.code === 'Escape') closeConvo(); return; }
+  if (convo && convo.state === 'menu') {
+    // arrows (or W/S) move the selection, Enter/Space/E takes it, 1-9 pick directly
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') return selectOpt(convo.sel - 1);
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') return selectOpt(convo.sel + 1);
+    if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space' || e.code === 'KeyE') return convo.opts[convo.sel].run();
+    const i = parseInt(e.key) - 1; if (convo.opts[i]) convo.opts[i].run(); if (e.code === 'Escape') closeConvo(); return;
+  }
   if (convo && e.code === 'Escape') return closeConvo();
   if (convo) return;
   const p = player;
-  if (e.code === 'KeyE' && !p.downed && !p.drawn) { const n = nearestTalker(); if (n) openMenu(n); }
-  if ((e.code === 'Space' || e.code === 'KeyF') && !p.downed) toggleWeapon(p);
-  if (e.code === 'AltLeft' || e.code === 'AltRight' || e.code === 'KeyV') jump(p);
-  if (e.code === 'KeyC' || e.code === 'NumpadMultiply') { sneakOn = !sneakOn; flash(sneakOn ? 'Sneaking' : 'Running'); }
+  const modern = scheme === 'modern';
+  if (modern) {
+    if (e.code === 'KeyE') actionPress();
+    else if (ACTION_DIRS[e.code] && actionHeld() && (p.drawn || p.drawing) && !p.downed) actionInput(ACTION_DIRS[e.code]); // action + direction
+  } else if (e.code === 'KeyE' && !p.downed && !p.drawn) { const n = nearestTalker(); if (n) openMenu(n); }
+  if ((modern ? e.code === 'ControlLeft' || e.code === 'ControlRight' : e.code === 'Space' || e.code === 'KeyF') && !p.downed) toggleWeapon(p);
+  if (modern ? e.code === 'Space' : e.code === 'AltLeft' || e.code === 'AltRight' || e.code === 'KeyV') jump(p);
+  if ((modern ? e.code === 'KeyX' : e.code === 'KeyC') || e.code === 'NumpadMultiply') { sneakOn = !sneakOn; flash(sneakOn ? 'Sneaking' : 'Running'); }
   if (e.code === 'KeyT') { const order = ['', '1HST1', '1HST2']; setStyle(order[(order.indexOf(p.style) + 1) % 3]); flash('One-handed: ' + STYLE_NAMES[p.style]); }
   if (e.code === 'KeyM') toggleMusic();
   if (e.code === 'KeyR' && p.downed && p.act && p.act.type === 'down') getUp(p);
 }
-function playerInput() {
+function playerInput(dt) {
   const p = player, k = keys;
   p.mv.f = 0; p.mv.s = 0;
   if (p.downed || lockedUI) return;
   p.mv.f = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0);
   p.mv.s = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
   p.gait = sneakOn ? 'sneak' : k.ShiftLeft || k.ShiftRight ? 'walk' : 'run';
+  if (p.drawn && actionHeld()) { p.mv.f = 0; p.mv.s = 0; } // holding the action key: the direction keys fight, not walk
   if (p.drawn && !p.drawing && p.mv.f < 0) { p.mv.f = 0; if (!p.act) jumpBack(p); }
   if (rmb && p.drawn && !p.drawing && !p.act) parade(p);
+  // locked focus (modern scheme): keep facing the target; A/D then circle around it
+  if (lockOn && (lockOn.downed || dist2(p, lockOn) > LOCK_RANGE)) lockOn = null;
+  if (actionHeld() && !lockOn) acquireLock(); // still holding: take the next target that comes into view
+  if (lockOn) { if (!p.act || p.act.type === 'parade') turnTo(p, lockOn.pos, dt, 9); p.focus = lockOn; return; }
   // focus: the NPC the hero is looking at
   let best = null, bs = 1e9;
   for (const n of npcs) {
@@ -879,7 +1036,7 @@ function fight(n, tgt, dt) {
   if (n.act) return; // attack/parade/jump in progress (combos are decided in attackTick)
   turnTo(n, tgt.pos, dt, 7);
   if (n.drawing) { if (d > 2) n.mv.f = 1; return; }
-  if (d > REACH - 0.2) { n.mv.f = 1; return; }
+  if (d > (n.reach || REACH) - 0.2) { n.mv.f = 1; return; }
   if (n.strafeT > 0) { n.strafeT -= dt; n.mv.s = n.strafeDir; return; }
   if (d < 0.9) return jumpBack(n);
   const ta = tgt.act;
@@ -1004,7 +1161,7 @@ function updateHud() {
   const p = player, f = p.focus, tag = $('ftag');
   if (f && !convo) {
     const v = f.pos.clone().setY(f.pos.y + 2.05).project(camera);
-    if (v.z < 1 && v.z > 0) { tag.style.display = 'block'; tag.style.left = (v.x * 0.5 + 0.5) * innerWidth + 'px'; tag.style.top = (-v.y * 0.5 + 0.5) * innerHeight + 'px'; setText(tag, f.name); }
+    if (v.z < 1 && v.z > 0) { tag.style.display = 'block'; tag.style.left = (v.x * 0.5 + 0.5) * innerWidth + 'px'; tag.style.top = (-v.y * 0.5 + 0.5) * innerHeight + 'px'; setText(tag, f === lockOn ? [['» ' + f.name + ' «', F10HI]] : f.name); }
     else tag.style.display = 'none';
   } else tag.style.display = 'none';
   // Gothic shows the focused opponent's health at the top while you fight
@@ -1019,8 +1176,9 @@ function updateHud() {
 // ---------------------------------------------------------------- main loop
 const clock = new THREE.Clock(); let pivotY = null, hudT = 0;
 function updateCamera(dt) {
-  const p = player, h = p.heading;
-  const headY = p.pos.y + (p.downed ? 0.6 : p.gait === 'sneak' ? 1.25 : 1.6);
+  const p = player, h = p.heading + (scheme === 'modern' && keys.KeyR && !p.downed && !lockedUI ? Math.PI : 0); // R: look back
+  const climbY = p.act && p.act.type === 'climb' ? p.rootY - STAND_Y : 0;
+  const headY = p.pos.y + climbY + (p.downed ? 0.6 : p.gait === 'sneak' ? 1.25 : 1.6);
   pivotY = pivotY === null ? headY : pivotY + (headY - pivotY) * Math.min(1, dt * 10); // smooth steps, not turning
   const piv = new THREE.Vector3(p.pos.x, pivotY, p.pos.z);
   const dist = p.drawn ? 2.7 : 3.2;
@@ -1035,7 +1193,7 @@ function updateCamera(dt) {
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   if (paused) { renderer.render(scene, camera); requestAnimationFrame(frame); return; } // world frozen behind the menu
-  playerInput();
+  playerInput(dt);
   if (convo) { player.mv.f = player.mv.s = 0; turnTo(player, convo.npc.pos, dt); }
   const ai = !window.__freezeAI;
   if (ai) for (const n of npcs) aiStep(n, dt);
@@ -1068,7 +1226,7 @@ function frame() {
   requestAnimationFrame(frame);
 }
 window.__game = {
-  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
+  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
   get yaw() { return player.heading; }, set yaw(v) { player.heading = v; }, set pitch(v) { pitch = v; },
   set sneak(v) { sneakOn = v; },
 };

@@ -17,11 +17,18 @@ BASE = [
     'T_RUNTURNL', 'T_RUNTURNR',
     # jumping: forward jump from a run or a stand, jump up, falling
     'T_RUNL_2_JUMP', 'T_STAND_2_JUMP', 'S_JUMP', 'T_JUMP_2_STAND', 'T_STAND_2_JUMPUP', 'S_JUMPUP', 'S_FALLDN', 'T_FALLDN_2_STAND',
+    # climbing onto ledges: low (waist), mid (chest), high (jump, hang on the edge, pull up)
+    'T_STAND_2_JUMPUPLOW', 'S_JUMPUPLOW', 'T_JUMPUPLOW_2_STAND', 'T_STAND_2_JUMPUPMID', 'S_JUMPUPMID', 'T_JUMPUPMID_2_STAND',
+    'T_JUMP_2_HANG', 'S_HANG', 'T_HANG_2_STAND',
     # one-handed weapon
     'T_RUN_2_1H', 'T_1H_2_1HRUN', 'T_MOVE_2_1HMOVE',
     'S_1HRUN', 'S_1HRUNL', 'S_1HWALKL', 'S_1HSNEAK', 'S_1HSNEAKL',
     'T_1HRUNSTRAFEL', 'T_1HRUNSTRAFER', 'T_1HSNEAKSTRAFEL', 'T_1HRUNTURNL', 'T_1HRUNTURNR',
     'S_1HATTACK', 'T_1HATTACKL', 'T_1HATTACKR', 'T_1HATTACKMOVE', 'T_1HPARADE_O', 'T_1HPARADEJUMPB',
+    # two-handed weapon (same roles as the one-handed clips above)
+    'T_MOVE_2_2HMOVE', 'S_2HRUN', 'S_2HRUNL', 'S_2HWALKL', 'S_2HSNEAK', 'S_2HSNEAKL',
+    'T_2HRUNSTRAFEL', 'T_2HRUNSTRAFER', 'T_2HSNEAKSTRAFEL',
+    'S_2HATTACK', 'T_2HATTACKL', 'T_2HATTACKR', 'T_2HPARADE_O', 'T_2HPARADEJUMPB',
     # hit / down
     'T_STUMBLE', 'T_STUMBLEB', 'T_STAND_2_WOUNDED', 'S_WOUNDED', 'T_WOUNDED_2_STAND',
     'T_STAND_2_WOUNDEDB', 'S_WOUNDEDB', 'T_WOUNDEDB_2_STAND',
@@ -31,8 +38,12 @@ BASE = [
     'T_STAND_2_HGUARD', 'S_HGUARD', 'T_STAND_2_LGUARD', 'S_LGUARD',
 ]
 DIALOG = [f'T_DIALOGGESTURE_{i:02d}' for i in range(1, 22)]
-STYLES = {'1HST1': 'HUMANS_1HST1', '1HST2': 'HUMANS_1HST2'}
+STYLES = {'1HST1': 'HUMANS_1HST1', '1HST2': 'HUMANS_1HST2', '2HST1': 'HUMANS_2HST1', '2HST2': 'HUMANS_2HST2'}
 STYLE_CLIPS = ['S_1HATTACK', 'T_1HATTACKL', 'T_1HATTACKR', 'T_1HPARADE_O', 'T_1HPARADEJUMPB', 'S_1HRUN', 'S_1HRUNL', 'S_1HWALKL']
+STYLE_CLIPS += [n.replace('1H', '2H') for n in STYLE_CLIPS]
+# walk overlays NPC scripts apply (Mdl_ApplyOverlayMds): guards walk like militia, Snaf and Whistler relaxed.
+# Keyed 'MILITIA:S_WALKL' etc.; only the clips the game plays.
+OVERLAYS = {'MILITIA': 'HUMANS_MILITIA', 'RELAXED': 'HUMANS_RELAXED'}
 
 EV = {int(v): k for k, v in zenkit.EventType.__members__.items()}
 
@@ -99,6 +110,12 @@ for style, script in STYLES.items():
     for nm in STYLE_CLIPS:
         c = load_clip(script, nm, info)
         if c: clips[style + ':' + nm] = c
+for key, script in OVERLAYS.items():
+    info = mds_info(script)
+    for nm in info:
+        if nm in BASE:
+            c = load_clip(script, nm, info)
+            if c: clips[key + ':' + nm] = c
 os.makedirs('export', exist_ok=True)
 json.dump({'clips': clips}, open('export/anims.json', 'w'), separators=(',', ':'))
 print('clips', len(clips), 'MB', round(os.path.getsize('export/anims.json') / 1e6, 2))
