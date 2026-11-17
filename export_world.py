@@ -209,6 +209,51 @@ def decal(c):
     place(c, tris, blend)
 
 
+# ------------------------------------------------------------------ doors (DOOR_WOODEN.MDS)
+# A door is a model: the leaf hangs on the hinge node BIP01 DOORANGLE, which the model's own clips swing open
+# (t_S0_2_S1) and shut (t_S1_2_S0). For each door we store the hinge's full transform (vob placement x model root x
+# animated hinge, converted to game space) for every frame of both clips; the game plays them when the door is used.
+C_GAME = np.diag([S, S, -S, 1.0])  # Gothic cm -> game metres, z mirrored
+
+
+def quat_m(q):
+    # same convention as export_anims.rot(): the binding's fields are rotated and Gothic stores the inverse rotation
+    w, x, y, z = q.z, -q.w, -q.x, -q.y
+    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                     [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                     [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+
+
+door_mdl = zenkit.Model.load(vfs.find('DOOR_WOODEN.MDL').open())
+door_root = m4(door_mdl.hierarchy.nodes[0].transform)
+_att = door_mdl.mesh.attachments
+door_leaf = dict(_att.items() if hasattr(_att, 'items') else _att)['BIP01 DOORANGLE']
+door_clips = {}
+for key, clip in (('open', 'T_S0_2_S1'), ('close', 'T_S1_2_S0')):
+    man = zenkit.ModelAnimation.load(vfs.find('DOOR_WOODEN-' + clip + '.MAN').open())
+    k = list(man.node_indices).index(1); n = man.node_count; L = []
+    for f in range(man.frame_count):
+        smp = man.samples[f * n + k]; M = np.eye(4); M[:3, :3] = quat_m(smp.rotation)
+        M[:3, 3] = [smp.position.x, smp.position.y, smp.position.z]; L.append(M)
+    door_clips[key] = (L, man.fps)
+_rest = m4(door_mdl.hierarchy.nodes[1].transform)
+print('door clip frame 0 vs rest pose: max diff', round(float(np.abs(door_clips['open'][0][0] - _rest).max()), 3))
+doors = []
+door_mesh = collections.defaultdict(lambda: {'p': [], 'u': []})
+for t, P3, uv in mrm_tris(door_leaf):  # the leaf in hinge space (Gothic cm); the per-frame matrices place it
+    g = door_mesh[t.rsplit('.', 1)[0]]
+    for i in (0, 1, 2): g['p'] += [round(float(v), 2) for v in P3[i]]; g['u'] += [round(uv[i][0], 4), round(1 - uv[i][1], 4)]
+
+
+def door(c):
+    cols = c.rotation.columns
+    V = np.eye(4); V[:3, :3] = [[cols[j].x for j in range(3)], [cols[j].y for j in range(3)], [cols[j].z for j in range(3)]]
+    V[:3, 3] = [c.position.x, c.position.y, c.position.z]
+    mats = {k: [[round(float(v), 5) for v in (C_GAME @ V @ door_root @ L).T.flatten()] for L in Ls] for k, (Ls, fps) in door_clips.items()}
+    doors.append({'locked': bool(c.is_locked), 'light': light_at(c.position.x, c.position.y, c.position.z),
+                  'p': [round(c.position.x * S, 2), round(c.position.y * S, 2), round(-c.position.z * S, 2)], **mats})
+
+
 def walk(v):
     global decals
     for c in v.children:
@@ -226,9 +271,10 @@ def walk(v):
             if type(c.visual).__name__ == 'VisualDecal': decal(c); decals += 1
             continue
         if ext not in ('3DS', 'ASC', 'MDS'): continue
+        if tn == 'Door' and name == 'DOOR_WOODEN.MDS': door(c); continue  # animated, see above
         tris = model_tris(name)
         if not tris: skipped[name] += 1; continue
-        # doors are closed in the ZEN but open when used in Gothic: walk-through. cd_dynamic = 'NPCs collide with it'.
+        # other Door vobs (beds) aren't solid; cd_dynamic = 'NPCs collide with it'
         flag = 'nocol' if (tn == 'Door' or not c.cd_dynamic) else ''
         place(c, tris, flag); props[ext] += 1
 
@@ -262,5 +308,11 @@ for base, alpha, flag, g in out:
     blob += b'\0' * (-len(blob) % 4)  # keep float32 views aligned
     meshes.append(meta)
 open('export/world.bin', 'wb').write(blob)
-json.dump({'meshes': meshes, 'lights': lights, 'center': [REGION_CX * S, 0, -REGION_CZ * S]}, open('export/world.json', 'w'), separators=(',', ':'))
+print('doors', len(doors), 'locked', sum(d['locked'] for d in doors))
+for t in door_mesh:  # the door leaf's textures
+    if t not in saved:
+        f = vfs.find(t + '-C.TEX')
+        if f: tx = zenkit.Texture.load(f.open()); Image.frombytes('RGBA', (tx.width, tx.height), tx.mipmap_rgba(0)).save(f'export/tex/{t}.png')
+json.dump({'meshes': meshes, 'lights': lights, 'doors': doors, 'doorMesh': [{'tex': t, **g} for t, g in door_mesh.items()],
+           'doorFps': door_clips['open'][1], 'doorSfx': {'open': 10 - 6, 'close': 0}, 'center': [REGION_CX * S, 0, -REGION_CZ * S]}, open('export/world.json', 'w'), separators=(',', ':'))
 print('meshes', len(meshes), 'world.bin MB', round(len(blob) / 1e6, 1))

@@ -158,10 +158,10 @@ const tris = []; // {a,b,c,n,tri,c8 (light bytes),col,kind}
 const CELL = 3, grid = new Map();
 const key = (cx, cz) => cx * 8192 + cz;
 const kindOf = t => /WOOD|HOLZ|BRETT|PLANK|BOARD|BEAM|BALK|PALISAD/.test(t) ? 'WOOD' : /STONE|STEIN|ROCK|FELS|MAUER|WALL|CASTLE|BURG|PFLASTER/.test(t) ? 'STONE' : /SAND/.test(t) ? 'SAND' : 'EARTH';
-function addTri(a, b, c, c8, kind) {
+function addTri(a, b, c, c8, kind, door = null) {
   const n = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
   const l = n.length(); if (l < 1e-6) return; n.divideScalar(l);
-  const idx = tris.push({ a, b, c, n, tri: new THREE.Triangle(a, b, c), c8, col: new THREE.Color(S2L[c8[0]], S2L[c8[1]], S2L[c8[2]]), kind }) - 1;
+  const idx = tris.push({ a, b, c, n, tri: new THREE.Triangle(a, b, c), c8, col: new THREE.Color(S2L[c8[0]], S2L[c8[1]], S2L[c8[2]]), kind, door }) - 1;
   const x0 = Math.min(a.x, b.x, c.x), x1 = Math.max(a.x, b.x, c.x), z0 = Math.min(a.z, b.z, c.z), z1 = Math.max(a.z, b.z, c.z);
   for (let cx = Math.floor(x0 / CELL); cx <= Math.floor(x1 / CELL); cx++)
     for (let cz = Math.floor(z0 / CELL); cz <= Math.floor(z1 / CELL); cz++) {
@@ -203,6 +203,57 @@ for (const m of world.meshes) {
     addTri(new THREE.Vector3(P[i], P[i + 1], P[i + 2]), new THREE.Vector3(P[i + 3], P[i + 4], P[i + 5]), new THREE.Vector3(P[i + 6], P[i + 7], P[i + 8]), c8, kind);
   }
 }
+// ---------------------------------------------------------------- doors
+// Gothic's wooden doors (DOOR_WOODEN.MDS): the leaf swings on its hinge with the model's own open/close clips,
+// exported as one hinge matrix per frame (export_world.py). Used with the action key / E when in focus; locked
+// ones only rattle. A shut door blocks characters and the camera.
+const DOOR_SND = { open: ['DOOR_OPEN01', 'DOOR_OPEN02'], close: ['DOOR_CLOSE01B', 'DOOR_CLOSE02B'], try: ['DOOR_TRY'] };
+const doors = [];
+if (world.doors) {
+  const parts = world.doorMesh.map(m => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(m.p, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(m.u, 2));
+    return { tex: m.tex, g, p: m.p };
+  });
+  const M = new THREE.Matrix4(), v = new THREE.Vector3();
+  for (const d of world.doors) {
+    const grp = new THREE.Group(); grp.matrixAutoUpdate = false; grp.matrix.fromArray(d.open[0]); scene.add(grp);
+    const door = { name: 'Door', locked: d.locked, open: d.open, close: d.close, grp, mats: [], c8: d.light, state: 'shut', t: 0, hl: false };
+    M.fromArray(d.open[0]); const box = new THREE.Box3();
+    for (const pt of parts) {
+      const mat = new THREE.MeshBasicMaterial({ map: getTex(pt.tex), side: THREE.DoubleSide }); door.mats.push(mat);
+      grp.add(new THREE.Mesh(pt.g, mat));
+      for (let i = 0; i < pt.p.length; i += 9) { // the shut leaf as collision triangles
+        const q = [0, 3, 6].map(k => v.set(pt.p[i + k], pt.p[i + k + 1], pt.p[i + k + 2]).applyMatrix4(M).clone());
+        q.forEach(x => box.expandByPoint(x)); addTri(q[0], q[1], q[2], d.light, 'WOOD', door);
+      }
+    }
+    door.pos = box.getCenter(new THREE.Vector3()).setY(box.min.y); // the name floats above the leaf, like an NPC's
+    doors.push(door);
+  }
+}
+function doorLight(d) { // baked light where the door stands, dimmed by the weather, brighter while in focus
+  const k = LIGHT_GAIN * SKY_DIM * (d.hl ? 1.35 : 1);
+  for (const m of d.mats) m.color.setRGB(S2L[d.c8[0]] * k, S2L[d.c8[1]] * k, S2L[d.c8[2]] * k);
+}
+function useDoor(d) {
+  if (d.state === 'opening' || d.state === 'closing') return;
+  if (d.locked) { loadSound(pick(DOOR_SND.try)).then(b => playBuf(b, d.pos.clone().setY(d.pos.y + 1), 0.9, 6)); showMsg('Locked', 1500); return; }
+  d.state = d.state === 'shut' ? 'opening' : 'closing'; d.t = 0; d.snd = false;
+}
+function updateDoors(dt) {
+  const fps = world.doorFps || 25, sfx = world.doorSfx || { open: 4, close: 0 };
+  for (const d of doors) {
+    doorLight(d);
+    if (d.state !== 'opening' && d.state !== 'closing') continue;
+    const clip = d.state === 'opening' ? d.open : d.close, f = (d.t += dt) * fps;
+    if (!d.snd && f >= (d.state === 'opening' ? sfx.open : sfx.close)) {
+      d.snd = true; loadSound(pick(DOOR_SND[d.state === 'opening' ? 'open' : 'close'])).then(b => playBuf(b, d.pos.clone().setY(d.pos.y + 1), 0.9, 6));
+    }
+    if (f >= clip.length - 1) { d.grp.matrix.fromArray(clip[clip.length - 1]); d.state = d.state === 'opening' ? 'open' : 'shut'; continue; }
+    d.grp.matrix.fromArray(clip[Math.floor(f)]); // (frames are 1/25 s apart: no need to blend)
+  }
+}
 function setBrightness(b) {
   brightness = b; store.set('light', b); buildS2L();
   for (const [c8, attr] of litMeshes) { const a = attr.array; for (let i = 0; i < a.length; i++) a[i] = S2L[c8[i]]; attr.needsUpdate = true; }
@@ -220,7 +271,7 @@ let gTri = -1; // triangle found by the last groundAt()
 function groundAt(x, z, yRef, step = 0.7) {
   let best = null; gTri = -1;
   for (const i of cellTris(x, z)) {
-    const t = tris[i]; if (t.n.y < 0.45) continue;
+    const t = tris[i]; if (t.n.y < 0.45 || t.door) continue;
     const { a, b, c } = t;
     const d = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z); if (Math.abs(d) < 1e-9) continue;
     const l1 = ((b.z - c.z) * (x - c.x) + (c.x - b.x) * (z - c.z)) / d;
@@ -237,6 +288,7 @@ function pushOut(pos, r = 0.42) {
     _c.set(pos.x, pos.y + 0.95, pos.z);
     for (const i of nearTris(pos.x, pos.z, r)) {
       const t = tris[i]; if (Math.abs(t.n.y) > 0.45) continue; // floors AND ceilings are not walls
+      if (t.door && t.door.state !== 'shut') continue; // an open (or moving) door doesn't block
       if (Math.max(t.a.y, t.b.y, t.c.y) < pos.y + 0.35 || Math.min(t.a.y, t.b.y, t.c.y) > pos.y + 1.7) continue;
       t.tri.closestPointToPoint(_c, _p);
       const dx = _c.x - _p.x, dz = _c.z - _p.z, h = Math.hypot(dx, dz), dy = _c.y - _p.y, dist = Math.hypot(h, dy);
@@ -258,6 +310,7 @@ function segCast(a, b) {
   for (let i = 0; i <= steps; i++) { const t = (i / steps) * len; for (const k of nearTris(a.x + dir.x * t, a.z + dir.z * t, 0.8)) cand.add(k); }
   let best = null;
   for (const k of cand) {
+    if (tris[k].door && tris[k].door.state !== 'shut') continue;
     const { a: p0, b: p1, c: p2 } = tris[k];
     _e1.subVectors(p1, p0); _e2.subVectors(p2, p0); _h.crossVectors(dir, _e2); const det = _e1.dot(_h);
     if (Math.abs(det) < 1e-8) continue; const inv = 1 / det;
@@ -500,7 +553,8 @@ class Char {
     if (b && b.kz) { const [rx, rz] = rootXZ(b.clip, frameAt(b)); this.bones[0].position.set(rx, y, rz * b.kz); }
     else this.bones[0].position.set(0, y, 0);
     this.light.lerp(this.lightTarget, Math.min(1, dt * 4));
-    const k = clamp(this.light.r * 1.7, 0.3, 1.25) * SKY_DIM, k2 = clamp(this.light.g * 1.7, 0.3, 1.25) * SKY_DIM, k3 = clamp(this.light.b * 1.7, 0.3, 1.25) * SKY_DIM;
+    const hl = this.hl ? 1.3 : 1; // in the hero's focus
+    const k = clamp(this.light.r * 1.7, 0.3, 1.25) * SKY_DIM * hl, k2 = clamp(this.light.g * 1.7, 0.3, 1.25) * SKY_DIM * hl, k3 = clamp(this.light.b * 1.7, 0.3, 1.25) * SKY_DIM * hl;
     for (const m of this.mats) m.color.setRGB(k, k2, k3);
     this.t += dt;
   }
@@ -868,8 +922,14 @@ const ACTION_DIRS = { KeyW: 'F', ArrowUp: 'F', KeyA: 'L', ArrowLeft: 'L', KeyD: 
 function actionPress() {
   const p = player; if (p.downed) return;
   acquireLock();
-  if (!p.drawn && !p.drawing) { const n = nearestTalker(); if (n) openMenu(n); return; }
+  if (!p.drawn && !p.drawing) { interact(); return; }
   const held = Object.keys(ACTION_DIRS).find(k => keys[k]); if (held) actionInput(ACTION_DIRS[held]); // direction already down
+}
+function interact() {
+  const p = player, n = p.focus && !p.focus.hostile && !p.focus.downed && dist2(p, p.focus) < 3.2 ? p.focus : null;
+  if (n) return openMenu(n);
+  if (p.focusDoor) return useDoor(p.focusDoor);
+  const t = nearestTalker(); if (t) openMenu(t);
 }
 function actionRelease() { if (!actionHeld()) lockOn = null; }
 function toggleLock() { if (lockOn) lockOn = null; else acquireLock(); }
@@ -921,6 +981,7 @@ function setStyle(s) { player.style = s; store.set('style', s); $('style').textC
 setStyle(player.style in STYLE_NAMES ? player.style : '');
 function restartArena() {
   if (convo) closeConvo(); lockOn = null;
+  for (const d of doors) { d.state = 'shut'; d.grp.matrix.fromArray(d.open[0]); }
   for (const c of entities) {
     Object.assign(c, { downed: false, act: null, drawing: null, hostile: null, vy: 0, air: false, fallT: 0, hp: c.maxHp, over: null, lookT: 0, warn: 0, weapT: 0 });
     c.drawn = false; c.slot(false); c.play(c.isPlayer ? 'S_RUN' : 'S_RUN', { blend: 0 });
@@ -989,7 +1050,7 @@ function onKey(e) {
   if (modern) {
     if (e.code === 'KeyE') actionPress();
     else if (ACTION_DIRS[e.code] && actionHeld() && (p.drawn || p.drawing) && !p.downed) actionInput(ACTION_DIRS[e.code]); // action + direction
-  } else if (e.code === 'KeyE' && !p.downed && !p.drawn) { const n = nearestTalker(); if (n) openMenu(n); }
+  } else if (e.code === 'KeyE' && !p.downed && !p.drawn) interact();
   if ((modern ? e.code === 'ControlLeft' || e.code === 'ControlRight' : e.code === 'Space' || e.code === 'KeyF') && !p.downed) toggleWeapon(p);
   if (modern ? e.code === 'Space' : e.code === 'AltLeft' || e.code === 'AltRight' || e.code === 'KeyV') jump(p);
   if ((modern ? e.code === 'KeyX' : e.code === 'KeyC') || e.code === 'NumpadMultiply') { sneakOn = !sneakOn; flash(sneakOn ? 'Sneaking' : 'Running'); }
@@ -1010,6 +1071,7 @@ function playerInput(dt) {
   // locked focus (modern scheme): keep facing the target; A/D then circle around it
   if (lockOn && (lockOn.downed || dist2(p, lockOn) > LOCK_RANGE)) lockOn = null;
   if (actionHeld() && !lockOn) acquireLock(); // still holding: take the next target that comes into view
+  p.focusDoor = null;
   if (lockOn) { if (!p.act || p.act.type === 'parade') turnTo(p, lockOn.pos, dt, 9); p.focus = lockOn; return; }
   // focus: the NPC the hero is looking at
   let best = null, bs = 1e9;
@@ -1019,6 +1081,14 @@ function playerInput(dt) {
     const s = d * (2.2 - dot); if (s < bs) { bs = s; best = n; }
   }
   p.focus = best;
+  if (!best && !p.drawn) {
+    let bd = 2.6;
+    for (const d of doors) {
+      const dd = Math.hypot(d.pos.x - p.pos.x, d.pos.z - p.pos.z); if (dd > bd || Math.abs(d.pos.y - p.pos.y) > 1.5) continue;
+      const to = new THREE.Vector3(d.pos.x - p.pos.x, 0, d.pos.z - p.pos.z).normalize(); if (p.fwd.dot(to) < 0.5) continue;
+      bd = dd; p.focusDoor = d;
+    }
+  }
 }
 
 // ---------------------------------------------------------------- AI
@@ -1316,14 +1386,14 @@ for (const L of world.lights || []) {
 
 // ---------------------------------------------------------------- HUD
 function updateHud() {
-  const p = player, f = p.focus, tag = $('ftag');
+  const p = player, f = p.focus || p.focusDoor, tag = $('ftag');
   if (f && !convo) {
     const v = f.pos.clone().setY(f.pos.y + 2.05).project(camera);
     if (v.z < 1 && v.z > 0) { tag.style.display = 'block'; tag.style.left = (v.x * 0.5 + 0.5) * innerWidth + 'px'; tag.style.top = (-v.y * 0.5 + 0.5) * innerHeight + 'px'; setText(tag, f === lockOn ? [['» ' + f.name + ' «', F10HI]] : f.name); }
     else tag.style.display = 'none';
   } else tag.style.display = 'none';
   // Gothic shows the focused opponent's health at the top while you fight
-  const foe = f && (p.drawn || f.hostile === p) ? f : null;
+  const foe = f && f.cast && (p.drawn || f.hostile === p) ? f : null;
   $('ehp').style.display = foe ? 'block' : 'none';
   if (foe) { setText($('ehpn'), foe.name); $('ehpf').style.width = Math.max(0, (100 * foe.hp) / foe.maxHp) + '%'; }
   $('hpf').style.width = Math.max(0, (100 * p.hp) / p.maxHp) + '%';
@@ -1352,6 +1422,9 @@ function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   if (paused) { if (rainGain) rainGain.gain.setTargetAtTime(0, actx.currentTime, 0.2); renderer.render(scene, camera); requestAnimationFrame(frame); return; } // world frozen behind the menu
   playerInput(dt);
+  for (const n of npcs) n.hl = n === player.focus && !convo;
+  for (const d of doors) d.hl = d === player.focusDoor && !convo;
+  updateDoors(dt);
   if (convo) { player.mv.f = player.mv.s = 0; turnTo(player, convo.npc.pos, dt); }
   const ai = !window.__freezeAI;
   if (ai) for (const n of npcs) aiStep(n, dt);
@@ -1385,7 +1458,7 @@ function frame() {
   requestAnimationFrame(frame);
 }
 window.__game = {
-  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, setWeather, wx, barrierFlash, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
+  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, doors, useDoor, setWeather, wx, barrierFlash, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
   get yaw() { return player.heading; }, set yaw(v) { player.heading = v; }, set pitch(v) { pitch = v; },
   set sneak(v) { sneakOn = v; },
 };
