@@ -60,11 +60,16 @@ for npc,v,disp,role in CAST:
         t['lines']=[ln for ln in t['lines'] if conv(ln['wav'])]
     ts=[t for t in ts if t['lines']]
     barks={}
-    for b in ['AARGH_1','AARGH_2','AARGH_3','CHEERFIGHT','THERESAFIGHT','ITWASAGOODFIGHT','DEAD','HEYYOU','FRIENDLYGREETINGS','YOUDEFEATEDMEWELL','WATCHYOURAIM','YEAHWELLDONE','OOH','SMALLTALK01','SMALLTALK02','SMALLTALK03']:
+    for b in ['AARGH_1','AARGH_2','AARGH_3','CHEERFIGHT','THERESAFIGHT','ITWASAGOODFIGHT','DEAD','HEYYOU','FRIENDLYGREETINGS','YOUDEFEATEDMEWELL','WATCHYOURAIM','YEAHWELLDONE','OOH','SMALLTALK01','SMALLTALK02','SMALLTALK03',
+              # reactions to the hero: sneaking up on them, walking around with a drawn weapon, after a duel
+              'WHATAREYOUDOING','HEYHEYHEY','WEAPONDOWN','ISAIDWEAPONDOWN','YOUASKEDFORIT','HEDEFEATEDHIM','YOUSTILLNOTHAVEENOUGH','WISEMOVE']:
         if conv(f'SVM_{int(v)}_{b}'): barks[b]=f'SVM_{int(v)}_{b}'.upper()
     cast.append({'id':npc,'name':disp,'role':role,'voice':v,'topics':ts,'barks':barks})
     print(disp,len(ts),[len(t['lines']) for t in ts],len(barks))
-sfx=['SWORD_DRAW_01','SWORD_DRAW_02','SWORD_FINALHIT','SWORD_UNDRAW_01','STEP_EARTH_01','STEP_EARTH_02','STEP_EARTH_03','STEP_STONE_01','STEP_STONE_02','STEP_STONE_03','CAMPFIRE_01','FIRE_MEDIUM01','BIRD_01','BIRD_03','BIRD_07','BIRD_08','ANVILHIT01','ANVILHIT02','ORC_AMBIENT01']
+sfx=['SWORD_DRAW_01','SWORD_DRAW_02','SWORD_FINALHIT','SWORD_UNDRAW_01','STEP_EARTH_01','STEP_EARTH_02','STEP_EARTH_03','STEP_STONE_01','STEP_STONE_02','STEP_STONE_03','CAMPFIRE_01','FIRE_MEDIUM01','BIRD_01','BIRD_03','BIRD_07','BIRD_08','ANVILHIT01','ANVILHIT02','ORC_AMBIENT01',
+     # combat collision sounds: weapon on weapon (parry), weapon on flesh (hit), body falling
+     *[f'CS_IAI_ME_ME_0{i}' for i in range(1,10)], *[f'CS_IAM_UD_FL_0{i}' for i in range(1,6)], 'M_FALL_SMALL01',
+     *[f'STEP_{m}_0{i}' for m in ('EARTH','STONE','WOOD','SAND') for i in range(1,6)]]
 sfx=[s for s in sfx if conv(s)]
 print('sfx',sfx,'files',len(done))
 for e in ['SVM_15_AARGH_1','SVM_15_AARGH_2','SVM_6_AARGH_3']: conv(e)

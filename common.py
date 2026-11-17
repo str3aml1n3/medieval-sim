@@ -11,8 +11,9 @@ DATA = os.path.join(GOTHIC_DIR, 'Data')              # *.VDF archives (meshes, t
 WORK = os.path.join(GOTHIC_DIR, '_work', 'Data')     # loose files: Music/, scripts/_compiled/
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'export')
 
-# Arena region exported from WORLD.ZEN, in Gothic units (cm). Centre is near the Old Camp arena.
-REGION_CX, REGION_CZ, REGION_R = 4300, 3400, 4200
+# Square of WORLD.ZEN exported, in Gothic units (cm): the whole Old Camp (palisade, moat, castle) plus a margin of
+# the valley around it, so the world doesn't end in mid-air at the camp's edge.
+REGION_CX, REGION_CZ, REGION_R = -400, -900, 12000
 
 
 def mount():

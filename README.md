@@ -1,7 +1,8 @@
 # medieval-sim
 
-A small medieval town simulation in the browser, built with three.js: the Old Camp arena with NPCs who duel,
-watch and cheer, voiced dialogue, sword fighting and adaptive music.
+A small medieval town simulation in the browser, built with three.js: the whole Old Camp with Gothic's own baked
+lighting, NPCs who duel, watch and cheer, voiced dialogue, Gothic-style sword fighting (combo windows, parries,
+fighting talents) with the original animations, walking/running/sneaking, and adaptive music.
 
 It runs on assets **extracted locally from your own copy of Gothic 1** (Piranha Bytes, 2001) using
 [ZenKit](https://github.com/GothicKit/ZenKit) and [dmusic](https://github.com/GothicKit/dmusic). Those assets are
@@ -13,9 +14,9 @@ engine without them. Play it locally.
 ```bash
 pip install zenkit pillow numpy
 export GOTHIC_DIR="/c/Program Files (x86)/Steam/steamapps/common/Gothic"   # your Gothic 1 folder
-./export_all.sh                                   # extracts world, characters, dialogue, audio (+ music if built)
+./export_all.sh                                   # extracts world, characters, animations, dialogue, audio (+ music if built)
 python -m http.server 8000 --bind 127.0.0.1       # from the repo root
-# open http://127.0.0.1:8000/web/
+# open http://127.0.0.1:8000/web/   (on Windows: double-click start.bat)
 ```
 
 For Gothic's own music, build the renderer first (needs CMake + a C compiler). See
@@ -24,31 +25,41 @@ generated score.
 
 ## Controls
 
+Gothic's layout, with the mouse turning the hero.
+
 | Key | Action |
 |---|---|
-| W A S D / Shift | move / run |
-| Mouse | look |
-| Left click, Space | attack |
-| Right click (hold) | block |
-| F | draw / sheathe weapon |
+| Mouse | turn (camera stays behind you) |
+| W / S | run forward / walk back |
+| A / D | strafe |
+| Shift (hold) | walk |
+| C | sneak on/off (silent: NPCs only notice what they see) |
+| Space or F | draw / sheathe weapon |
+| Left click | attack; click again as the swing ends to chain a combo (clicking too early breaks it) |
+| A / D + left click | swing left / right |
+| Right click, or S + left click | parry |
+| S (weapon drawn) | jump back |
+| T | one-handed talent: untrained / trained / master (longer combos) |
 | E, then 1–7 | talk, pick a dialogue option |
 | M | music on/off |
-| R | get up after defeat |
-| Esc / P | pause menu (controls legend, volume, restart) |
+| R | get up after being knocked down |
+| Esc / P | pause menu (controls, volume, mouse speed, restart) |
 
 ## Repository layout
 
 | Path | What |
 |---|---|
 | `common.py` | shared config (`GOTHIC_DIR`, export region) and VFS/world helpers |
-| `export_world.py` | terrain + props + textures of the arena region → `world.json` |
+| `export_world.py` | world mesh + props + decals + lights of the Old Camp, with baked lighting → `world.json`, `world.bin` |
+| `export_anims.py` | Gothic's human animations + combat event frames → `anims.json` |
 | `export_chars.py` | skeleton, armors, heads, weapons → `chars.json` |
 | `export_wp.py` | waypoints → `waypoints.json` |
 | `export_lines.py` | subtitle text index from `OUINFO.INF` → `all_lines.json` |
-| `export_audio.py` | speech, barks, SFX (ADPCM → PCM) + dialogue topics → `audio/`, `dialogue.json` |
+| `export_audio.py` | speech, barks, SFX incl. combat sounds (ADPCM → PCM) + dialogue topics → `audio/`, `dialogue.json` |
 | `export_music.py` | DirectMusic themes → looping WAVs via `tools/render` → `music/` |
 | `export_all.sh` | runs all of the above in order |
 | `run.sh` | runs one script with the right `PYTHONPATH`, filtering ZenKit exit noise |
+| `start.ps1`, `start.bat` | serve the repo locally and open the game |
 | `tools/render/` | `render-music.c`: C renderer on GothicKit/dmusic (dmusic itself is cloned to `tools/dmusic`, git-ignored) |
 | `web/` | the game: `index.html` + `game.js` |
 | `.github/workflows/pages.yml` | deploys `web/` to GitHub Pages (engine only, no assets) |

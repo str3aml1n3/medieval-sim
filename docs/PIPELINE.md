@@ -6,9 +6,10 @@ install by the scripts in this repo. `export/` is git-ignored and is never commi
 ```
 Gothic install                    scripts                       export/
 ─────────────────────────────     ───────────────────────────   ──────────────────────────────
-Data/*.VDF ─┬─ WORLD.ZEN ───────► export_world.py ─────────────► world.json, tex/*.png
+Data/*.VDF ─┬─ WORLD.ZEN ───────► export_world.py ─────────────► world.json, world.bin, tex/*.png
             │                   ► export_wp.py ────────────────► waypoints.json
             ├─ HUMANS.MDH, *.MDM, *.MMB, *.MRM ► export_chars.py ► chars.json, tex/*.png
+            ├─ HUMANS*.MDS, HUMANS*-*.MAN ─► export_anims.py ─────────────► anims.json
             └─ SOUND/*.WAV ─────┐
 _work/Data/scripts/_compiled/   │
    OUINFO.INF ─────────────────► export_lines.py ─────────────► all_lines.json
@@ -32,7 +33,7 @@ All shared settings live in `common.py`:
 | Setting | Default | Meaning |
 |---|---|---|
 | `GOTHIC_DIR` (env var) | `C:\Program Files (x86)\Steam\steamapps\common\Gothic` | Gothic 1 install folder (contains `Data/` and `_work/`) |
-| `REGION_CX`, `REGION_CZ`, `REGION_R` | `4300, 3400, 4200` | Square of the colony exported, in Gothic units (cm). Centred on the Old Camp arena. |
+| `REGION_CX`, `REGION_CZ`, `REGION_R` | `-400, -900, 12000` | Square of the colony exported, in Gothic units (cm): the whole Old Camp (palisade, moat, castle) plus a margin of valley. |
 
 `run.sh` runs a script with the repo on `PYTHONPATH` and filters ZenKit's harmless `__del__` messages printed at
 interpreter exit. Set `PYTHON` if `python` on your PATH isn't the one with ZenKit installed.
@@ -42,7 +43,7 @@ interpreter exit. Set `PYTHON` if `python` on your PATH isn't the one with ZenKi
 ```bash
 export GOTHIC_DIR="/c/Program Files (x86)/Steam/steamapps/common/Gothic"
 export PYTHON=python          # or a full path
-./export_all.sh               # everything, in order (~15–30 min; WORLD.ZEN parsing dominates)
+./export_all.sh               # everything, in order (a few minutes; audio decoding dominates)
 ./run.sh export_world.py      # or one step at a time
 ```
 
@@ -55,26 +56,33 @@ python -m http.server 8000 --bind 127.0.0.1
 
 ## Scripts
 
-### `export_world.py` → `world.json`, `tex/*.png`
-Loads `WORLD.ZEN`, keeps the static world mesh polygons inside the region, plus every static prop
-(VOB with a `.3DS` visual, compiled as `.MRM`) placed inside it, transformed by the VOB's position and
-rotation. Polygons are fan-triangulated and grouped by texture. Each texture is decoded from `<NAME>-C.TEX`
-to PNG.
+### `export_world.py` → `world.json`, `world.bin`, `tex/*.png`
+Loads `WORLD.ZEN` and keeps, inside the region:
 
-- Skips **ghost occluders** (invisible helper polygons).
-- **Portal** polygons (hut door curtains) are kept visible but tagged `portal: true` so the game doesn't
-  collide with them.
-- `alpha: true` marks textures with transparency (foliage, fences): rendered with alpha test, no collision.
+- **World mesh polygons**, fan-triangulated. Ghost occluders are skipped; **portal** polygons (door curtains) stay
+  visible but don't collide; **water** materials are translucent and don't collide.
+- **Baked lighting** as vertex colours: each polygon vertex's light colour, or, for lightmapped polygons (indoors),
+  a bilinear sample of the polygon's lightmap at that vertex (UV = `lightmap.normal · (P − origin)`), pulled 15%
+  toward the polygon centre because lightmap borders are often black.
+- **Props**: `.3DS` visuals (compiled `.MRM`) and `.ASC`/`.MDS` models (compiled `.MDL`, or `.MDH` + `.MDM` for the
+  locked chests that ship without one: node-hierarchy attachments and soft-skin meshes in bind pose), transformed by
+  the vob's rotation (`rotation.columns` are the matrix columns, verified against the stored world bounding boxes)
+  and position. Props take the baked light of the floor below them. Vobs without `cd_dynamic` and all **doors**
+  (closed in the ZEN, opened by use in Gothic) are flagged `nocol`.
+- **Decals** (`.TGA` visuals): a double-sided quad of `dimension` (half extents) + `offset` in the vob's plane.
+- **Dynamic lights** (torches, fires): position, colour, range, whether they flicker.
 
-`world.json`: `{ meshes: [{ tex, alpha, portal, p: [x,y,z,…], u: [u,v,…] }], center }`. Triangle soup in
-metres, three.js coordinates.
+Geometry is grouped by `(texture, flag)` and written to `world.bin` (float32 positions, float32 UVs, uint8 RGB
+vertex colours per group). `world.json`: `{ meshes: [{ tex, alpha, flag, n, p, u, c }], lights, center }`, where
+`p/u/c` are byte offsets into `world.bin`, `n` the vertex count and `flag` one of `'' | nocol | portal | decal | water`.
 
 ### `export_chars.py` → `chars.json`, `tex/*.png`
 Builds skinned human models from the shared `HUMANS.MDH` skeleton (34 nodes):
 
 - **outfits**: `HUM_<X>_ARMOR.MDM` soft-skin meshes (GRDM, STTM, SLDM, VLKM, NOVM, ORGM, KDFM) and the naked body
 - **heads**: `HUM_HEAD_<X>.MMB` morph meshes, rigidly weighted to `BIP01 HEAD`
-- **weapons**: `ITMW_*.MRM` meshes, rigidly weighted to the `ZS_RIGHTHAND` attachment node
+- **weapons**: `ITMW_*.MRM` meshes, rigidly weighted to the `ZS_RIGHTHAND` attachment node (`weapons`), and the
+  same meshes in their own node-local space (`weaponsLocal`), which the game hangs on `ZS_SWORD` or `ZS_RIGHTHAND`
 
 Soft-skin vertices are stored per bone as *node-local* positions with weights. The script resolves them to
 bind-pose model space (`Σ weight · nodeWorld · localPos`) and keeps up to 4 influences.
@@ -83,6 +91,23 @@ bind-pose model space (`Σ weight · nodeWorld · localPos`) and keeps up to 4 i
 `m` is the bone's local matrix (column-major, metres) and each part is
 `{ tex, p, u, si: [4 bone indices/vertex], sw: [4 weights/vertex] }`. The model origin is the pelvis. The game
 lifts it by the lowest vertex so feet sit on the ground.
+
+### `export_anims.py` → `anims.json`
+Gothic animates humans with `HUMANS.MDS` (model script: clip names, frame ranges, layers, event tags) and one
+`HUMANS-<CLIP>.MAN` per clip (per frame, per bone: local rotation quaternion + position). Fighting talents are overlay
+scripts (`HUMANS_1HST1.MDS`, `HUMANS_1HST2.MDS`) with their own `.MAN` files for attacks, parade and stance.
+
+The script exports the clips the game uses (locomotion for running/walking/sneaking, one-handed fighting, hit
+reactions, knock-out, spectating, guarding, dialogue gestures) plus the trained/master variants as `1HST1:<CLIP>`
+and `1HST2:<CLIP>`. Per clip: `fps`, frame count `n`, `nodes` (bone indices), `q` (rotations, x,y,z,w per frame per
+node), `root` (BIP01 translation per frame, metres), `speed` (average horizontal root speed, m/s), `layer` and `ev`:
+the combat event frames `optimal_frame` (blow lands), `hit_end` (combo segment ends) and `combo_window` (pairs of
+frames in which the next attack input chains), converted from ASC frame numbers to clip frames.
+
+**Quaternion convention**: the ZenKit Python binding's `Quat` fields come out rotated (the true w,x,y,z are the
+fields `.z,.w,.x,.y`) and Gothic stores the inverse rotation. This was determined by matching every bone of
+`S_RUN`'s first frame against the `HUMANS.MDH` rest pose (median error 0.005); then the z-mirror is applied as
+`(w, −x, −y, z)`.
 
 ### `export_wp.py` → `waypoints.json`
 Waynet points inside the region: `[{ n: name, x, y, z }]`. The game uses them to place NPCs and to find the arena.
@@ -95,7 +120,9 @@ It maps each speech WAV id to `(speaker, subtitle)`, keeping only ids whose WAV 
 ### `export_audio.py` → `audio/*.wav`, `dialogue.json`
 - Picks a cast of six Old Camp NPCs (`CAST`), groups their lines into conversation **topics** by the
   `INFO_<NPC>_<TOPIC>_<voice>_<n>` naming scheme (NPC voice + hero voice 15), ordered by `n`.
-- Adds per-voice **barks** (`SVM_<voice>_<NAME>`: pain, cheering, greetings, …) and a list of sound effects.
+- Adds per-voice **barks** (`SVM_<voice>_<NAME>`: pain, cheering, greetings, reactions to sneaking and drawn
+  weapons, …) and sound effects: footsteps per ground material, Gothic's collision sounds `CS_IAI_ME_ME_*`
+  (weapon on weapon) and `CS_IAM_UD_FL_*` (weapon on flesh), and `M_FALL_SMALL01`.
 - Decodes Gothic's **IMA ADPCM** WAVs (format tag 17, which browsers don't play) to 16-bit PCM in pure Python.
 
 `dialogue.json`: `{ cast: [{ id, name, role, voice, topics: [{ id, lines: [{ who, text, wav }] }], barks }], sfx }`.
@@ -144,3 +171,8 @@ outweighs down-facing area about 5:1.
 | Empty mesh after loading | `World.load` is a static constructor; calling it on an instance does nothing | `w = zenkit.World.load(...)` |
 | Speech plays as noise / not at all | IMA ADPCM WAVs | decode to PCM in `export_audio.py` |
 | Music clips | dmusic synth runs hot at full volume | render at 0.45, then normalise |
+| Camp cut off mid-air, moat floating | export square centred on the arena, 84 m wide | region covers the whole camp (240 m) |
+| World flat and unreadable | baked light not exported | per-vertex light + sampled lightmaps as vertex colours |
+| Doors, chests, benches, torches missing | only `.3DS` vobs exported | load `.MDL` (or `.MDH`+`.MDM`) for `.ASC`/`.MDS` visuals |
+| Characters walk through props | `cd_static` used for collision; it is off for most props | `cd_dynamic` is the "NPCs collide" flag |
+| Animated bones twisted | quaternion field order / inverse rotation | see *Quaternion convention* above |

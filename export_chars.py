@@ -73,8 +73,21 @@ def rigid_part(mesh, bone, tex_override=None):
                 si+=[names[bone],0,0,0]; sw+=[1,0,0,0]
         parts.append({'tex':t,'p':p,'u':u,'si':si,'sw':sw})
     return parts
+def local_part(mesh):
+    # vertices in the attachment node's own (mirrored) space: the game parents these to ZS_RIGHTHAND / ZS_SWORD
+    parts=[]
+    for sub in mesh.submeshes:
+        t=savetex(sub.material.texture or '')
+        if not t: continue
+        p=[];u=[]
+        for tr in sub.triangles:
+            for k in (0,1,2):
+                wd=sub.wedges[tr.wedges[k]]; q=mesh.positions[wd.index]
+                p+=[round(q.x*S,4),round(q.y*S,4),round(-q.z*S,4)]; u+=[round(wd.texture.x,4),round(1-wd.texture.y,4)]
+        parts.append({'tex':t,'p':p,'u':u})
+    return parts
 os.makedirs('export/tex',exist_ok=True)
-out={'bones':bones,'outfits':{},'heads':{},'weapons':{}}
+out={'bones':bones,'outfits':{},'heads':{},'weapons':{},'weaponsLocal':{}}
 for o in ['GRDM','STTM','SLDM','VLKM','NOVM','ORGM','KDFM']:
     try: out['outfits'][o]=skin_parts(f'HUM_{o}_ARMOR.MDM')
     except Exception as e: print('skip',o,e)
@@ -86,7 +99,7 @@ for hd in ['FIGHTER','THIEF','PONY','BALD','FATBALD','PSIONIC']:
     except Exception as e: print('skip head',hd,e)
 for wn,mrm in [('sword','ITMW_1H_SWORD_01.MRM'),('axe','ITMW_1H_AXE_01.MRM'),('mace','ITMW_1H_MACE_01.MRM'),('hammer','ITMW_1H_SLEDGEHAMMER_01.MRM')]:
     try:
-        m=zenkit.MultiResolutionMesh.load(vfs.find(mrm).open()); out['weapons'][wn]=rigid_part(m,'ZS_RIGHTHAND')
+        m=zenkit.MultiResolutionMesh.load(vfs.find(mrm).open()); out['weapons'][wn]=rigid_part(m,'ZS_RIGHTHAND'); out['weaponsLocal'][wn]=local_part(m)
     except Exception as e: print('skip weapon',wn,e)
 # sanity: model height
 allp=np.array([out['outfits']['GRDM'][i]['p'] for i in range(len(out['outfits']['GRDM']))],dtype=object)
