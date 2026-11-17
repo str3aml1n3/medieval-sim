@@ -43,6 +43,7 @@ The mouse turns the hero in both.
 | jump back (weapon drawn) | S | S |
 | talk | action key (weapon sheathed) | E |
 | pick a dialogue option | ↑/↓ + Enter, or 1–7 | same |
+| skip the line being spoken | right click | right click |
 | look back | R (hold) | – |
 | get up after a knock-down | R | R |
 | one-handed talent | T | T |

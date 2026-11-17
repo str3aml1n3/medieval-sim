@@ -42,7 +42,9 @@ def conv(name):
         o.setnchannels(1); o.setsampwidth(2); o.setframerate(rate); o.writeframes(a.tobytes())
     done.add(name); return True
 lines=json.load(open('export/all_lines.json'))
-CAST=[('KIRGO','05','Kirgo','arena fighter'),('THORUS','09','Thorus','castle guard captain'),('BLOODWYN','08','Bloodwyn','Shadow enforcer'),('FLETCHER','06','Fletcher','Old Camp thug'),('SNAF','01','Snaf','cook'),('WHISTLER','11','Whistler','Shadow')]
+CAST=[('KIRGO','05','Kirgo','arena fighter'),('THORUS','09','Thorus','castle guard captain'),('BLOODWYN','08','Bloodwyn','guard'),('FLETCHER','06','Fletcher','guard'),('SNAF','01','Snaf','cook'),('WHISTLER','11','Whistler','Shadow'),
+      # the arena's duelists, as in Gothic: a New Camp mercenary and a Sect Camp templar
+      ('KHARIM','09','Kharim','arena fighter from the New Camp'),('GORHANIS','08','Gor Hanis','arena fighter from the Sect Camp')]
 cast=[]
 for npc,v,disp,role in CAST:
     topics=collections.defaultdict(list)

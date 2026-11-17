@@ -95,7 +95,7 @@ asks for unaccelerated movement. Mouse speed is a pause-menu slider (stored in `
 ## NPC AI (`aiStep`)
 | Duty | Behaviour |
 |---|---|
-| `duel` | Kirgo and Whistler fight in the pit; 4 s after both are up again they restart |
+| `duel` | Kharim and Gor Hanis (Gothic's arena fighters, an even match) fight in the pit; 4 s after both are up again they restart |
 | `watch` | face the pit in `S_WATCHFIGHT`, random gestures, cheer/groan + bark when blows land |
 | `guard` | Thorus stands in `S_HGUARD` |
 | `idle` | Snaf wanders within 3 m of his post (walking) |

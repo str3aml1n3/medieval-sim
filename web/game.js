@@ -233,8 +233,8 @@ if (world.doors) {
   }
 }
 function doorLight(d) { // baked light where the door stands, dimmed by the weather, brighter while in focus
-  const k = LIGHT_GAIN * SKY_DIM * (d.hl ? 1.35 : 1);
-  for (const m of d.mats) m.color.setRGB(S2L[d.c8[0]] * k, S2L[d.c8[1]] * k, S2L[d.c8[2]] * k);
+  const h = d.hl ? 0.25 : 0, k = LIGHT_GAIN * SKY_DIM * (1 + h);
+  for (const m of d.mats) m.color.setRGB(S2L[d.c8[0]] * k + h, S2L[d.c8[1]] * k + h, S2L[d.c8[2]] * k + h);
 }
 function useDoor(d) {
   if (d.state === 'opening' || d.state === 'closing') return;
@@ -553,8 +553,9 @@ class Char {
     if (b && b.kz) { const [rx, rz] = rootXZ(b.clip, frameAt(b)); this.bones[0].position.set(rx, y, rz * b.kz); }
     else this.bones[0].position.set(0, y, 0);
     this.light.lerp(this.lightTarget, Math.min(1, dt * 4));
-    const hl = this.hl ? 1.3 : 1; // in the hero's focus
-    const k = clamp(this.light.r * 1.7, 0.3, 1.25) * SKY_DIM * hl, k2 = clamp(this.light.g * 1.7, 0.3, 1.25) * SKY_DIM * hl, k3 = clamp(this.light.b * 1.7, 0.3, 1.25) * SKY_DIM * hl;
+    const hl = this.hl ? 0.22 : 0; // in the hero's focus: lifted towards white, so it shows even in the dark
+    const lift = v => v * (1 + hl) + hl;
+    const k = lift(clamp(this.light.r * 1.7, 0.3, 1.25) * SKY_DIM), k2 = lift(clamp(this.light.g * 1.7, 0.3, 1.25) * SKY_DIM), k3 = lift(clamp(this.light.b * 1.7, 0.3, 1.25) * SKY_DIM);
     for (const m of this.mats) m.color.setRGB(k, k2, k3);
     this.t += dt;
   }
@@ -650,8 +651,11 @@ const PIT = ring.length ? ring.reduce((a, b) => a.clone().add(b)).divideScalar(r
 // Fighting skill: Gothic's 1H talent picks the animation set (untrained / HUMANS_1HST1 / HUMANS_1HST2) and with it the
 // combo length; `skill` is how reliably the AI parries and chains combos. Damage = strength + weapon - armour.
 const castCfg = {
-  KIRGO: { pos: PIT.clone().add(new THREE.Vector3(-1.8, 0, 0)), duty: 'duel', skill: 0.5 },
-  WHISTLER: { pos: PIT.clone().add(new THREE.Vector3(1.8, 0, 0)), duty: 'duel', skill: 0.35 },
+  KIRGO: { pos: wpFix('OCR_OUTSIDE_ARENA_BARONS_HUT'), duty: 'watch', skill: 0.5 },
+  WHISTLER: { pos: wpFix('OCR_OUTSIDE_ARENA_BENCH2'), duty: 'watch', skill: 0.35 },
+  // the duel in the pit: Gothic's arena fighters Kharim (New Camp) and Gor Hanis (Sect Camp), an even match
+  KHARIM: { pos: PIT.clone().add(new THREE.Vector3(-1.8, 0, 0)), duty: 'duel', skill: 0.6 },
+  GORHANIS: { pos: PIT.clone().add(new THREE.Vector3(1.8, 0, 0)), duty: 'duel', skill: 0.6 },
   THORUS: { pos: wpFix('OCR_ARENA_BARONS_HUT'), duty: 'guard', guard: true, skill: 0.85 },
   BLOODWYN: { pos: wpFix('OCR_OUTSIDE_ARENA_HANGAROUND'), duty: 'watch', guard: true, skill: 0.7 },
   FLETCHER: { pos: wpFix('OCR_OUTSIDE_ARENA_01'), duty: 'watch', guard: true, skill: 0.55 },
@@ -1024,12 +1028,17 @@ function playTopic(n, t) {
   const next = () => {
     if (!convo || convo.npc !== n) return;
     if (i >= t.lines.length) { setText($('sub'), ''); n.talking = false; return openMenu(n); }
-    const l = t.lines[i++]; n.talking = l.who === 'npc';
+    const l = t.lines[i++], line = ++convo.line; n.talking = l.who === 'npc';
     setText($('sub'), [[(l.who === 'npc' ? n.name : 'You') + ': ', F10HI], [l.text, F10]], innerWidth * 0.6 / uiScale());
-    playVoice(l.wav, () => setTimeout(next, 350));
+    // each line advances once: when its voice ends, or when it is skipped (right click), whichever comes first
+    playVoice(l.wav, () => setTimeout(() => { if (convo && convo.line === line) next(); }, 350));
   };
+  convo.line = 0;
+  convo.skip = () => { if (voiceAudio && voiceAudio.isPlaying) { voiceAudio.onEnded = () => {}; voiceAudio.stop(); voiceAudio.isPlaying = false; } next(); };
   next();
 }
+// right click skips the line being spoken (the pointer is free during a conversation, so this has its own listener)
+addEventListener('mousedown', e => { if (e.button === 2 && convo && convo.state === 'talk' && convo.skip) convo.skip(); });
 function closeConvo() { if (convo) convo.npc.talking = false; convo = null; lockedUI = false; $('menu').style.display = 'none'; $('hp').style.visibility = ''; setText($('sub'), ''); if (voiceAudio && voiceAudio.isPlaying) { voiceAudio.onEnded = () => {}; voiceAudio.stop(); } lockPointer(); }
 const flash = t => showMsg(t, 2000);
 function onKey(e) {
@@ -1245,19 +1254,27 @@ if (barrierData) {
   domeGlow = new THREE.BufferAttribute(new Float32Array(g.attributes.position.count), 1); g.setAttribute('glow', domeGlow);
   const pa = g.attributes.position; for (let i = 0; i < pa.count; i++) domeVerts.push(new THREE.Vector3().fromBufferAttribute(pa, i));
   const dome = new THREE.Mesh(g, glowMat({ map: { value: skyTex('BARRIERE') }, time: { value: 0 } },
-    `uniform sampler2D map; uniform float time; varying float vg; varying vec2 vuv;
-     void main(){ vec3 t = texture2D(map, vuv * 3.0 + vec2(time * 0.012, time * 0.027)).rgb;
-       gl_FragColor = vec4(t * vec3(0.55, 0.75, 1.0) * (0.035 + vg), 1.0); }`,
-    'attribute float glow; varying float vg; varying vec2 vuv; void main(){ vg = glow; vuv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'));
+    // the lightning veins (BARRIERE) projected from the dome's position in two drifting layers (the mesh's own UVs
+    // stretch one tile over hundreds of metres); they show in large patches that wander over the sky, plus flares
+    `uniform sampler2D map; uniform float time; varying float vg; varying vec3 vpos;
+     void main(){
+       vec3 t = texture2D(map, vec2(vpos.x + vpos.y * 0.4, vpos.z - vpos.y * 0.3) / 300.0 + vec2(time * 0.006, time * 0.011)).rgb;
+       float w = sin(vpos.x * 0.017 + time * 0.09) * sin(vpos.z * 0.021 - time * 0.07) + 0.5 * sin(vpos.y * 0.03 + vpos.x * 0.008 + time * 0.05);
+       float patchv = smoothstep(0.2, 0.9, w) * 0.45;
+       gl_FragColor = vec4(t * vec3(0.6, 0.8, 1.0) * (patchv + vg), 1.0); }`,
+    'attribute float glow; varying float vg; varying vec3 vpos; void main(){ vg = glow; vpos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'));
   dome.renderOrder = -0.9; dome.frustumCulled = false; barrier.add(dome);
 }
 const thunderTex = [0, 1, 2, 3].map(i => skyTex('THUNDER_A' + i));
 const boltVert = 'varying vec2 vuv; void main(){ vuv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
-const boltFrag = 'uniform sampler2D map; uniform float k; varying vec2 vuv; void main(){ gl_FragColor = vec4(texture2D(map, vuv).rgb * vec3(0.7, 0.85, 1.0) * k, 1.0); }';
+const boltFrag = 'uniform sampler2D map; uniform float k; varying vec2 vuv; void main(){ gl_FragColor = vec4(texture2D(map, vuv).rgb * vec3(0.8, 0.9, 1.0) * k * 1.8, 1.0); }';
 ['MFX_BARRIERE_AMBIENT', 'MFX_BARRIERE_SHOOT'].forEach(loadSound);
 function barrierFlash() {
   const up = domeVerts.filter(v => v.y > 60); if (!up.length) return;
-  const c = pick(up); flashes.push({ c, r: rand(90, 220), t: 0, dur: rand(1.2, 2.6), peak: rand(0.35, 0.8) });
+  // mostly where the hero is looking (the dome follows the camera, so direction = dome point - camera position)
+  const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
+  const seen = up.filter(v => v.clone().sub(camera.position).normalize().dot(fwd) > 0.87); // within ~30° of the view
+  const c = pick(seen.length && Math.random() < 0.75 ? seen : up); flashes.push({ c, r: rand(90, 220), t: 0, dur: rand(1.2, 2.6), peak: rand(0.35, 0.8) });
   if (Math.random() < 0.65) {
     // a jagged bolt along the dome from the flash towards a neighbouring point
     const near = up.filter(v => { const d = v.distanceTo(c); return d > 80 && d < 260; }); if (!near.length) return;
@@ -1266,7 +1283,7 @@ function barrierFlash() {
       const p = c.clone().lerp(b, i / 10); if (i && i < 10) p.add(new THREE.Vector3(rand(-14, 14), rand(-14, 14), rand(-14, 14)));
       pts.push(p);
     }
-    const pos = [], uv = [], W = 7;
+    const pos = [], uv = [], W = 28;
     for (let i = 0; i < pts.length - 1; i++) {
       const a = pts[i], e = pts[i + 1], dir = e.clone().sub(a).normalize(), out = a.clone().sub(ctr).normalize();
       const side = new THREE.Vector3().crossVectors(dir, out).normalize().multiplyScalar(W);
@@ -1458,7 +1475,7 @@ function frame() {
   requestAnimationFrame(frame);
 }
 window.__game = {
-  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, doors, useDoor, setWeather, wx, barrierFlash, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
+  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, barrierState: { flashes, bolts, barrier }, doors, useDoor, setWeather, wx, barrierFlash, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
   get yaw() { return player.heading; }, set yaw(v) { player.heading = v; }, set pitch(v) { pitch = v; },
   set sneak(v) { sneakOn = v; },
 };

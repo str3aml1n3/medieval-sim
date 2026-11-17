@@ -104,7 +104,7 @@ for wn,mrm in [('sword','ITMW_1H_SWORD_01.MRM'),('axe','ITMW_1H_AXE_01.MRM'),('m
 # --- the cast's real looks, read by running each NPC's instance in Gothic's compiled scripts (GOTHIC.DAT):
 # Mdl_SetVisualBody(npc, body, bodyTex, skin, head, headTex, teeth, armor) picks the meshes and texture variants,
 # EquipItem gives the melee weapon, Mdl_SetModelScale the build. (Same NPC ids as export_audio.py's CAST.)
-CAST_IDS=['KIRGO','THORUS','BLOODWYN','FLETCHER','SNAF','WHISTLER']
+CAST_IDS=['KIRGO','THORUS','BLOODWYN','FLETCHER','SNAF','WHISTLER','KHARIM','GORHANIS']
 vm=zenkit.DaedalusVm.load(os.path.join(WORK,'scripts','_compiled','GOTHIC.DAT'))
 DI=zenkit.DaedalusInstance; rec={}
 def _vis(npc,body,btex,skin,head,htex,teeth,armor): rec.update(body=body,btex=btex,skin=skin,head=head,htex=htex,teeth=teeth,armor=armor)
