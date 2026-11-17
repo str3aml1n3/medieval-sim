@@ -63,7 +63,11 @@ def texname(mat):
 
 floor_tris = []; floor_cols = []
 nt = 0
-for poly in m.polygons:
+# Gothic only renders polygons referenced by a leaf of the world's BSP tree. The rest of WORLD.ZEN's mesh (~24%)
+# is leftover geometry the engine never draws: huge stretched triangles hanging through the camp, buried pieces.
+leaf = set(w.bsp_tree.leaf_polygon_indices)
+for pi_, poly in enumerate(m.polygons):
+    if pi_ not in leaf: continue
     if poly.is_ghost_occluder: continue  # invisible helper polys
     idx = poly.position_indices; fi = poly.feature_indices
     p = [pos[i] for i in idx]
@@ -88,7 +92,7 @@ for poly in m.polygons:
             n = np.cross(B - A, C - A); ln = np.linalg.norm(n)
             if ln > 0 and n[1] / ln > 0.5:
                 floor_tris.append((A, B, C)); floor_cols.append(np.mean([cols[j] for j in tri], 0))
-print('world tris', nt, 'lightmaps sampled', len(lm_cache))
+print('world tris', nt, 'lightmaps sampled', len(lm_cache), 'BSP leaf polygons', len(leaf), 'of', len(m.polygons))
 FT = np.array(floor_tris); FC = np.array(floor_cols)
 
 
@@ -200,7 +204,9 @@ def decal(c):
     uv = [(0, 1), (1, 1), (1, 0), (0, 0)]
     tris = [(t, [q[0], q[1], q[2]], [uv[0], uv[1], uv[2]]), (t, [q[0], q[2], q[3]], [uv[0], uv[2], uv[3]])]
     tris += [(t, [a[2], a[1], a[0]], [b[2], b[1], b[0]]) for _, a, b in tris]  # both sides
-    place(c, tris, 'decal')
+    # Gothic blends decals by their alpha function: spider silk and dirt patches are additive, runes multiply (x2)
+    blend = {2: 'decal_blend', 3: 'decal_add', 5: 'decal_mul', 6: 'decal_mul2'}.get(int(v.alpha_func), 'decal')
+    place(c, tris, blend)
 
 
 def walk(v):
@@ -228,6 +234,7 @@ def walk(v):
 
 
 for r in w.root_objects: walk(r)
+print('decal blends', collections.Counter(k[1] for k in groups if k[1].startswith('decal')))
 print('props', dict(props), 'decals', decals, 'lights', len(lights), 'skipped', dict(skipped.most_common(8)))
 
 # ------------------------------------------------------------------ textures + output

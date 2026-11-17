@@ -14,8 +14,9 @@ reads the JSON/BIN/PNG/WAV files from `../export/`. If they're missing or from a
 Each world mesh is `MeshBasicMaterial` with **vertex colours**: Gothic's baked light (per-vertex light, or a
 lightmap sampled at export). The bytes are converted from sRGB to linear so that texture × light matches Gothic's
 gamma-space modulation; `MIN_LIGHT` adds Gothic's ambient floor so hut interiors stay readable, and `LIGHT_GAIN`
-scales the result. Alpha textures (foliage, fences) and decals are alpha-tested and double-sided, water is
-translucent. A gradient sky dome follows the camera; fog hides the edge of the exported square.
+scales the result. Alpha textures (foliage, fences) are alpha-tested and double-sided; decals blend like
+Gothic's alpha functions (additive, multiply ×2, alpha blend); water is translucent. Textures use the GPU's maximum
+anisotropic filtering, since most ground is seen at grazing angles. A gradient sky dome follows the camera; fog hides the edge of the exported square.
 
 Characters use Lambert materials lit by a hemisphere light + sun, and are **tinted by the baked light of the floor
 triangle they stand on**, so they darken indoors. The 7 dynamic light vobs (torches, fires) become flickering point

@@ -42,7 +42,8 @@ const texCache = {};
 function getTex(name) {
   if (!texCache[name]) {
     const t = texLoader.load(E + 'tex/' + name + '.png');
-    t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+    t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy(); // ground seen at grazing angles smears badly below ~16x
     texCache[name] = t;
   }
   return texCache[name];
@@ -145,12 +146,17 @@ for (const m of world.meshes) {
   g.setAttribute('position', new THREE.BufferAttribute(P, 3));
   g.setAttribute('uv', new THREE.BufferAttribute(U, 2));
   g.setAttribute('color', new THREE.BufferAttribute(C, 3));
-  const water = m.flag === 'water', decal = m.flag === 'decal', cut = m.alpha || decal;
+  const water = m.flag === 'water', decal = m.flag.startsWith('decal'), cut = m.alpha || m.flag === 'decal';
+  const blended = water || (decal && m.flag !== 'decal'), mul = m.flag === 'decal_mul' || m.flag === 'decal_mul2';
   const mat = new THREE.MeshBasicMaterial({
-    map: getTex(m.tex), vertexColors: true, color: new THREE.Color(LIGHT_GAIN, LIGHT_GAIN, LIGHT_GAIN),
-    alphaTest: cut && !water ? 0.5 : 0, side: cut || water ? THREE.DoubleSide : THREE.FrontSide,
-    transparent: water, opacity: water ? 0.7 : 1, depthWrite: !water,
+    map: getTex(m.tex), vertexColors: !mul, color: mul ? 0xffffff : new THREE.Color(LIGHT_GAIN, LIGHT_GAIN, LIGHT_GAIN),
+    alphaTest: cut ? 0.5 : 0, side: cut || blended ? THREE.DoubleSide : THREE.FrontSide,
+    transparent: blended, opacity: water ? 0.7 : 1, depthWrite: !blended, fog: !mul,
   });
+  // decals blend like Gothic's alpha functions: ADD = src*alpha + dst, MUL = src*dst, MUL2 = 2*src*dst
+  if (m.flag === 'decal_add') mat.blending = THREE.AdditiveBlending;
+  if (mul) Object.assign(mat, { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor,
+    blendDst: m.flag === 'decal_mul2' ? THREE.SrcColorFactor : THREE.ZeroFactor });
   if (decal) { mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -2; }
   scene.add(new THREE.Mesh(g, mat));
   // collide only with solid, opaque geometry: not foliage/fences (alpha), door curtains, open doors, decals, water

@@ -60,7 +60,9 @@ python -m http.server 8000 --bind 127.0.0.1
 ### `export_world.py` → `world.json`, `world.bin`, `tex/*.png`
 Loads `WORLD.ZEN` and keeps, inside the region:
 
-- **World mesh polygons**, fan-triangulated. Ghost occluders are skipped; **portal** polygons (door curtains) stay
+- **World mesh polygons** referenced by a leaf of the BSP tree (`bsp_tree.leaf_polygon_indices`), fan-triangulated.
+  That is what Gothic renders: about a quarter of the mesh is leftover geometry it never draws (huge stretched
+  triangles through the camp, buried pieces). Ghost occluders are skipped; **portal** polygons (door curtains) stay
   visible but don't collide; **water** materials are translucent and don't collide.
 - **Baked lighting** as vertex colours: each polygon vertex's light colour, or, for lightmapped polygons (indoors),
   a bilinear sample of the polygon's lightmap at that vertex (UV = `lightmap.normal · (P − origin)`), pulled 15%
@@ -70,12 +72,13 @@ Loads `WORLD.ZEN` and keeps, inside the region:
   the vob's rotation (`rotation.columns` are the matrix columns, verified against the stored world bounding boxes)
   and position. Props take the baked light of the floor below them. Vobs without `cd_dynamic` and all **doors**
   (closed in the ZEN, opened by use in Gothic) are flagged `nocol`.
-- **Decals** (`.TGA` visuals): a double-sided quad of `dimension` (half extents) + `offset` in the vob's plane.
+- **Decals** (`.TGA` visuals): a double-sided quad of `dimension` (half extents) + `offset` in the vob's plane,
+  flagged by the decal's alpha function: `decal_add` (spider silk, dirt patches), `decal_mul2` (wall runes), etc.
 - **Dynamic lights** (torches, fires): position, colour, range, whether they flicker.
 
 Geometry is grouped by `(texture, flag)` and written to `world.bin` (float32 positions, float32 UVs, uint8 RGB
 vertex colours per group). `world.json`: `{ meshes: [{ tex, alpha, flag, n, p, u, c }], lights, center }`, where
-`p/u/c` are byte offsets into `world.bin`, `n` the vertex count and `flag` one of `'' | nocol | portal | decal | water`.
+`p/u/c` are byte offsets into `world.bin`, `n` the vertex count and `flag` one of `'' | nocol | portal | water | decal | decal_add | decal_blend | decal_mul | decal_mul2`.
 
 ### `export_chars.py` → `chars.json`, `tex/*.png`
 Builds skinned human models from the shared `HUMANS.MDH` skeleton (34 nodes):
@@ -178,6 +181,8 @@ outweighs down-facing area about 5:1.
 | Empty mesh after loading | `World.load` is a static constructor; calling it on an instance does nothing | `w = zenkit.World.load(...)` |
 | Speech plays as noise / not at all | IMA ADPCM WAVs | decode to PCM in `export_audio.py` |
 | Music clips | dmusic synth runs hot at full volume | render at 0.45, then normalise |
+| Stretched ground smeared across the camp, "things underground" | exported every mesh polygon, including ~24% Gothic never draws | keep only BSP leaf polygons |
+| Dirt patches/webs/runes as hard blotches | decals alpha-tested instead of blended | blend by the decal's alpha function |
 | Camp cut off mid-air, moat floating | export square centred on the arena, 84 m wide | region covers the whole camp (240 m) |
 | World flat and unreadable | baked light not exported | per-vertex light + sampled lightmaps as vertex colours |
 | Doors, chests, benches, torches missing | only `.3DS` vobs exported | load `.MDL` (or `.MDH`+`.MDM`) for `.ASC`/`.MDS` visuals |
