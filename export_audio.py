@@ -69,7 +69,9 @@ for npc,v,disp,role in CAST:
 sfx=['SWORD_DRAW_01','SWORD_DRAW_02','SWORD_FINALHIT','SWORD_UNDRAW_01','STEP_EARTH_01','STEP_EARTH_02','STEP_EARTH_03','STEP_STONE_01','STEP_STONE_02','STEP_STONE_03','CAMPFIRE_01','FIRE_MEDIUM01','BIRD_01','BIRD_03','BIRD_07','BIRD_08','ANVILHIT01','ANVILHIT02','ORC_AMBIENT01',
      # combat collision sounds: weapon on weapon (parry), weapon on flesh (hit), body falling
      *[f'CS_IAI_ME_ME_0{i}' for i in range(1,10)], *[f'CS_IAM_UD_FL_0{i}' for i in range(1,6)], 'M_FALL_SMALL01',
-     *[f'STEP_{m}_0{i}' for m in ('EARTH','STONE','WOOD','SAND') for i in range(1,6)]]
+     *[f'STEP_{m}_0{i}' for m in ('EARTH','STONE','WOOD','SAND') for i in range(1,6)],
+     # the barrier's crackle and bolts, and the rain loop (export_sky.py exports their textures)
+     'MFX_BARRIERE_AMBIENT','MFX_BARRIERE_SHOOT','MFX_BARRIERE_WARNING','RAIN_01']
 sfx=[s for s in sfx if conv(s)]
 print('sfx',sfx,'files',len(done))
 for e in ['SVM_15_AARGH_1','SVM_15_AARGH_2','SVM_6_AARGH_3']: conv(e)

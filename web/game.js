@@ -24,7 +24,8 @@ scene.fog = new THREE.Fog(FOG, 45, 160);
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 600);
 addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 // characters are lit by a sky/ground hemisphere + sun, then tinted by Gothic's baked light where they stand
-scene.add(new THREE.HemisphereLight(0xe4ecf4, 0x6a5a40, 1.5));
+const hemi = new THREE.HemisphereLight(0xe4ecf4, 0x6a5a40, 1.5); scene.add(hemi);
+let SKY_DIM = 1; // < 1 under rain clouds: scales the world's baked light and the characters' light (weather section)
 const sun = new THREE.DirectionalLight(0xfff0d8, 1.4); sun.position.set(-50, 45, 20); scene.add(sun);
 // Gothic's day sky: two scrolling cloud layers on a flat sky plane (SKYDAY_LAYER0 = opaque base tinted sky blue,
 // SKYDAY_LAYER1 = alpha clouds over it), fading into the fog colour at the horizon. Math is done in sRGB, like Gothic.
@@ -33,15 +34,19 @@ const fogSRGB = new THREE.Vector3(((FOG >> 16) & 255) / 255, ((FOG >> 8) & 255) 
 const SUN_DIR = sun.position.clone().normalize();
 const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 32, 16), new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false, fog: false,
-  uniforms: { l0: { value: skyTex('SKYDAY_LAYER0_A0') }, l1: { value: skyTex('SKYDAY_LAYER1_A0') }, fogc: { value: fogSRGB }, time: { value: 0 } },
+  uniforms: { l0: { value: skyTex('SKYDAY_LAYER0_A0') }, l1: { value: skyTex('SKYDAY_LAYER1_A0') }, l2: { value: skyTex('SKYRAINCLOUDS') },
+    fogc: { value: fogSRGB.clone() }, time: { value: 0 }, cloud: { value: 0 } },
   vertexShader: 'varying vec3 vp; void main(){ vp = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-  fragmentShader: `uniform sampler2D l0, l1; uniform vec3 fogc; uniform float time; varying vec3 vp;
+  fragmentShader: `uniform sampler2D l0, l1, l2; uniform vec3 fogc; uniform float time, cloud; varying vec3 vp;
     void main(){
       vec3 d = normalize(vp);
       vec2 uv = d.xz / (max(d.y, 0.0) + 0.12);              // flat sky plane seen from below
       vec3 base = texture2D(l0, uv * 0.55 + vec2(time * 0.004, time * 0.0015)).rgb * vec3(0.72, 0.95, 1.42);
       vec4 cl = texture2D(l1, uv * 0.8 + vec2(time * 0.009, time * 0.003));
       vec3 c = mix(base, cl.rgb * vec3(0.96, 0.97, 1.0), cl.a * 0.85);
+      // weather: Gothic's rain cloud layer (SKYRAINCLOUDS) rolls in over the day sky
+      vec3 rc = texture2D(l2, uv * 0.6 + vec2(time * 0.012, time * 0.004)).rgb * 0.85;
+      c = mix(c, rc, cloud * 0.92);
       gl_FragColor = vec4(mix(fogc, c, smoothstep(0.0, 0.28, d.y)), 1.0);
     }`,
 }));
@@ -147,7 +152,8 @@ const S2L = new Float32Array(256);
 const buildS2L = () => { for (let i = 0; i < 256; i++) S2L[i] = Math.pow(Math.max(i, MIN_LIGHT) / 255, 2.2 / brightness); };
 buildS2L();
 const PORTAL_FADE = [8, 20]; // metres: invisible nearer than 8 m, solid beyond 20 m
-const litMeshes = []; // [raw light bytes, colour attribute] per world mesh, re-lit when the brightness changes
+const litMeshes = [];
+const worldMats = []; // world materials tinted by the baked light: dimmed under rain clouds // [raw light bytes, colour attribute] per world mesh, re-lit when the brightness changes
 const tris = []; // {a,b,c,n,tri,c8 (light bytes),col,kind}
 const CELL = 3, grid = new Map();
 const key = (cx, cz) => cx * 8192 + cz;
@@ -188,7 +194,7 @@ for (const m of world.meshes) {
     sh.fragmentShader = 'varying float vCamDist;\n' + sh.fragmentShader.replace('#include <alphatest_fragment>',
       '#include <alphatest_fragment>\n  diffuseColor.a *= smoothstep(' + PORTAL_FADE[0].toFixed(1) + ', ' + PORTAL_FADE[1].toFixed(1) + ', vCamDist);');
   };
-  scene.add(new THREE.Mesh(g, mat));
+  scene.add(new THREE.Mesh(g, mat)); if (!mul) worldMats.push(mat);
   // collide only with solid, opaque geometry: not foliage/fences (alpha), door curtains, open doors, decals, water
   if (m.alpha || m.flag) continue;
   const kind = kindOf(m.tex);
@@ -494,7 +500,7 @@ class Char {
     if (b && b.kz) { const [rx, rz] = rootXZ(b.clip, frameAt(b)); this.bones[0].position.set(rx, y, rz * b.kz); }
     else this.bones[0].position.set(0, y, 0);
     this.light.lerp(this.lightTarget, Math.min(1, dt * 4));
-    const k = clamp(this.light.r * 1.7, 0.3, 1.25), k2 = clamp(this.light.g * 1.7, 0.3, 1.25), k3 = clamp(this.light.b * 1.7, 0.3, 1.25);
+    const k = clamp(this.light.r * 1.7, 0.3, 1.25) * SKY_DIM, k2 = clamp(this.light.g * 1.7, 0.3, 1.25) * SKY_DIM, k3 = clamp(this.light.b * 1.7, 0.3, 1.25) * SKY_DIM;
     for (const m of this.mats) m.color.setRGB(k, k2, k3);
     this.t += dt;
   }
@@ -1149,6 +1155,150 @@ function schedule() {
   }
 }
 
+// ---------------------------------------------------------------- the barrier
+// Gothic 1's magic barrier: the dome over the valley (MAGICFRONTIER_OUT), drawn by the engine with the BARRIERE
+// texture. Mostly a faint shimmer; every few seconds a patch of it flares up, often with a lightning bolt
+// (THUNDER_A0..A3) crackling across it and the barrier's sound. It is far bigger than the camera's range, so like the
+// sky it follows the camera, at half scale: always behind the world, with a little parallax.
+const barrierData = await jget('barrier.json').catch(() => null);
+const BARRIER_K = 0.5;
+const barrier = new THREE.Group(); barrier.scale.setScalar(BARRIER_K); scene.add(barrier);
+const domeVerts = [], flashes = [], bolts = [];
+let domeGlow = null, flashT = rand(2, 5);
+// additive, drawn right after the sky with no depth test, before the (opaque) world covers it
+const glowMat = (uniforms, frag, vert) => new THREE.ShaderMaterial({ uniforms, vertexShader: vert, fragmentShader: frag,
+  blending: THREE.AdditiveBlending, transparent: false, depthWrite: false, depthTest: false, side: THREE.DoubleSide, fog: false });
+if (barrierData) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(barrierData.p, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(barrierData.u, 2));
+  domeGlow = new THREE.BufferAttribute(new Float32Array(g.attributes.position.count), 1); g.setAttribute('glow', domeGlow);
+  const pa = g.attributes.position; for (let i = 0; i < pa.count; i++) domeVerts.push(new THREE.Vector3().fromBufferAttribute(pa, i));
+  const dome = new THREE.Mesh(g, glowMat({ map: { value: skyTex('BARRIERE') }, time: { value: 0 } },
+    `uniform sampler2D map; uniform float time; varying float vg; varying vec2 vuv;
+     void main(){ vec3 t = texture2D(map, vuv * 3.0 + vec2(time * 0.012, time * 0.027)).rgb;
+       gl_FragColor = vec4(t * vec3(0.55, 0.75, 1.0) * (0.035 + vg), 1.0); }`,
+    'attribute float glow; varying float vg; varying vec2 vuv; void main(){ vg = glow; vuv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'));
+  dome.renderOrder = -0.9; dome.frustumCulled = false; barrier.add(dome);
+}
+const thunderTex = [0, 1, 2, 3].map(i => skyTex('THUNDER_A' + i));
+const boltVert = 'varying vec2 vuv; void main(){ vuv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+const boltFrag = 'uniform sampler2D map; uniform float k; varying vec2 vuv; void main(){ gl_FragColor = vec4(texture2D(map, vuv).rgb * vec3(0.7, 0.85, 1.0) * k, 1.0); }';
+['MFX_BARRIERE_AMBIENT', 'MFX_BARRIERE_SHOOT'].forEach(loadSound);
+function barrierFlash() {
+  const up = domeVerts.filter(v => v.y > 60); if (!up.length) return;
+  const c = pick(up); flashes.push({ c, r: rand(90, 220), t: 0, dur: rand(1.2, 2.6), peak: rand(0.35, 0.8) });
+  if (Math.random() < 0.65) {
+    // a jagged bolt along the dome from the flash towards a neighbouring point
+    const near = up.filter(v => { const d = v.distanceTo(c); return d > 80 && d < 260; }); if (!near.length) return;
+    const b = pick(near), ctr = new THREE.Vector3(0, 0, 0), pts = [];
+    for (let i = 0; i <= 10; i++) {
+      const p = c.clone().lerp(b, i / 10); if (i && i < 10) p.add(new THREE.Vector3(rand(-14, 14), rand(-14, 14), rand(-14, 14)));
+      pts.push(p);
+    }
+    const pos = [], uv = [], W = 7;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], e = pts[i + 1], dir = e.clone().sub(a).normalize(), out = a.clone().sub(ctr).normalize();
+      const side = new THREE.Vector3().crossVectors(dir, out).normalize().multiplyScalar(W);
+      const q = [a.clone().add(side), a.clone().sub(side), e.clone().add(side), e.clone().sub(side)], v0 = i / 10, v1 = (i + 1) / 10;
+      pos.push(...q[0].toArray(), ...q[1].toArray(), ...q[2].toArray(), ...q[1].toArray(), ...q[3].toArray(), ...q[2].toArray());
+      uv.push(0, v0, 1, v0, 0, v1, 1, v0, 1, v1, 0, v1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    const m = new THREE.Mesh(g, glowMat({ map: { value: thunderTex[0] }, k: { value: 1 } }, boltFrag, boltVert));
+    m.renderOrder = -0.8; m.frustumCulled = false; barrier.add(m);
+    bolts.push({ m, t: 0, life: rand(0.45, 0.9) });
+    // the crackle, from the bolt's direction
+    const wp = c.clone().multiplyScalar(BARRIER_K).add(camera.position.clone().multiplyScalar(1 - BARRIER_K));
+    const at = camera.position.clone().add(wp.sub(camera.position).normalize().multiplyScalar(30));
+    loadSound(pick(['MFX_BARRIERE_AMBIENT', 'MFX_BARRIERE_SHOOT'])).then(buf => playBuf(buf, at, 0.55, 30));
+  }
+}
+function updateBarrier(dt) {
+  barrier.position.copy(camera.position).multiplyScalar(1 - BARRIER_K);
+  if (!domeGlow) return;
+  barrier.children[0].material.uniforms.time.value = clock.elapsedTime;
+  if ((flashT -= dt) < 0) { flashT = rand(3, 10); barrierFlash(); }
+  const gl = domeGlow.array; gl.fill(0);
+  for (let f = flashes.length - 1; f >= 0; f--) {
+    const F = flashes[f]; F.t += dt; if (F.t > F.dur) { flashes.splice(f, 1); continue; }
+    const env = F.peak * Math.min(1, F.t / 0.15) * (1 - F.t / F.dur) * (0.75 + 0.25 * Math.sin(F.t * 40)); // flickering fade
+    for (let i = 0; i < domeVerts.length; i++) { const d = domeVerts[i].distanceTo(F.c); if (d < F.r) gl[i] += env * (1 - d / F.r); }
+  }
+  domeGlow.needsUpdate = true;
+  for (let i = bolts.length - 1; i >= 0; i--) {
+    const B = bolts[i]; B.t += dt; const u = B.m.material.uniforms;
+    if (B.t > B.life) { barrier.remove(B.m); B.m.geometry.dispose(); B.m.material.dispose(); bolts.splice(i, 1); continue; }
+    u.map.value = thunderTex[Math.floor(B.t * 20) % 4]; u.k.value = (1 - B.t / B.life) * (Math.random() < 0.8 ? 1 : 0.3);
+  }
+}
+
+// ---------------------------------------------------------------- weather
+// Dynamic: clear spells and showers alternate. Clouds build up over ~40 s, Gothic's rain clouds cover the sky, fog
+// closes in, light dims, rain falls around the camera with Gothic's rain loop (muffled and hidden under a roof).
+// Pause menu: Dynamic / Clear / Rain.
+let weatherMode = store.get('weather', 'dynamic');
+const wx = { cloud: 0, rain: 0, wantRain: false, t: rand(120, 300), indoor: false, roofT: 0 };
+const FOG_CLEAR = new THREE.Color(FOG), FOG_RAIN = new THREE.Color(0x646c72);
+const RAIN_N = 1600, RAIN_BOX = [34, 20, 34], rainPos = new Float32Array(RAIN_N * 6), rainSeed = new Float32Array(RAIN_N * 3);
+for (let i = 0; i < RAIN_N; i++) { rainSeed[i * 3] = Math.random(); rainSeed[i * 3 + 1] = Math.random(); rainSeed[i * 3 + 2] = Math.random(); }
+const rainGeo = new THREE.BufferGeometry(); rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+const rainMat = new THREE.LineBasicMaterial({ color: 0xb4bec6, transparent: true, opacity: 0, depthWrite: false });
+const rainLines = new THREE.LineSegments(rainGeo, rainMat); rainLines.frustumCulled = false; scene.add(rainLines);
+let rainSrc = null, rainGain = null, rainLP = null;
+function startRainSound() {
+  if (rainSrc || actx.state !== 'running') return;
+  rainSrc = actx.createBufferSource(); rainGain = actx.createGain(); rainLP = actx.createBiquadFilter();
+  rainGain.gain.value = 0; rainLP.type = 'lowpass'; rainLP.frequency.value = 20000;
+  loadSound('RAIN_01').then(b => { if (!b) return; rainSrc.buffer = b; rainSrc.loop = true; rainSrc.connect(rainLP).connect(rainGain).connect(actx.destination); rainSrc.start(); });
+}
+function setWeather(m) { weatherMode = m; store.set('weather', m); $('weather').value = m; }
+$('weather').addEventListener('change', e => setWeather(e.target.value));
+setWeather(weatherMode);
+function updateWeather(dt) {
+  // what the sky is heading for
+  if (weatherMode === 'dynamic') { if ((wx.t -= dt) < 0) { wx.wantRain = !wx.wantRain; wx.t = wx.wantRain ? rand(90, 180) : rand(120, 300); } }
+  else wx.wantRain = weatherMode === 'rain';
+  wx.cloud = clamp(wx.cloud + (wx.wantRain ? dt : -dt) / 40, 0, 1);
+  wx.rain = smooth(clamp((wx.cloud - 0.55) / 0.45, 0, 1));
+  const c = smooth(wx.cloud);
+  // sky, fog and light
+  const fc = FOG_CLEAR.clone().lerp(FOG_RAIN, c); scene.fog.color.copy(fc); scene.background.copy(fc);
+  scene.fog.near = 45 - 20 * c; scene.fog.far = 160 - 70 * c;
+  const su = sky.material.uniforms, fs = fc.clone().convertLinearToSRGB(); su.cloud.value = c; su.fogc.value.set(fs.r, fs.g, fs.b); // the sky works in sRGB
+  SKY_DIM = 1 - 0.38 * c;
+  for (const m of worldMats) m.color.setScalar(LIGHT_GAIN * SKY_DIM);
+  hemi.intensity = 1.5 * (1 - 0.3 * c); sun.intensity = 1.4 * (1 - 0.8 * c); sunSprite.material.opacity = 1 - c;
+  // under a roof? (checked a few times a second): no rain in view, muffled sound
+  if ((wx.roofT -= dt) < 0) { wx.roofT = 0.3; const p = camera.position; wx.indoor = segCast(p, p.clone().add(new THREE.Vector3(0, 15, 0))) !== null; }
+  const r = wx.rain;
+  rainLines.visible = r > 0.01 && !wx.indoor;
+  if (rainLines.visible) {
+    rainMat.opacity = 0.45 * r;
+    const cp = camera.position, t = clock.elapsedTime, fall = 13, wind = [2.2, 0.9], len = 0.55;
+    const n = Math.floor(RAIN_N * r);
+    for (let i = 0; i < RAIN_N; i++) {
+      const o = i * 6, s3 = i * 3;
+      if (i >= n) { rainPos.fill(0, o, o + 6); continue; }
+      // each drop loops through a box that moves with the camera
+      const y = ((rainSeed[s3 + 1] * RAIN_BOX[1] - t * fall) % RAIN_BOX[1] + RAIN_BOX[1]) % RAIN_BOX[1];
+      const fallen = RAIN_BOX[1] - y;
+      const x = cp.x + ((rainSeed[s3] * RAIN_BOX[0] + fallen * wind[0] / fall - cp.x) % RAIN_BOX[0] + RAIN_BOX[0]) % RAIN_BOX[0] - RAIN_BOX[0] / 2;
+      const z = cp.z + ((rainSeed[s3 + 2] * RAIN_BOX[2] + fallen * wind[1] / fall - cp.z) % RAIN_BOX[2] + RAIN_BOX[2]) % RAIN_BOX[2] - RAIN_BOX[2] / 2;
+      const yy = cp.y - 6 + y;
+      rainPos[o] = x; rainPos[o + 1] = yy; rainPos[o + 2] = z;
+      rainPos[o + 3] = x - wind[0] / fall * len; rainPos[o + 4] = yy + len; rainPos[o + 5] = z - wind[1] / fall * len;
+    }
+    rainGeo.attributes.position.needsUpdate = true;
+  }
+  if (r > 0.01) startRainSound();
+  if (rainGain) {
+    rainGain.gain.setTargetAtTime(r * (wx.indoor ? 0.35 : 0.8), actx.currentTime, 0.3);
+    rainLP.frequency.setTargetAtTime(wx.indoor ? 900 : 20000, actx.currentTime, 0.3);
+  }
+}
+
 // ---------------------------------------------------------------- torches and fires (Gothic's dynamic light vobs)
 const glowTex = (() => {
   const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
@@ -1200,7 +1350,7 @@ function updateCamera(dt) {
 }
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
-  if (paused) { renderer.render(scene, camera); requestAnimationFrame(frame); return; } // world frozen behind the menu
+  if (paused) { if (rainGain) rainGain.gain.setTargetAtTime(0, actx.currentTime, 0.2); renderer.render(scene, camera); requestAnimationFrame(frame); return; } // world frozen behind the menu
   playerInput(dt);
   if (convo) { player.mv.f = player.mv.s = 0; turnTo(player, convo.npc.pos, dt); }
   const ai = !window.__freezeAI;
@@ -1227,6 +1377,7 @@ function frame() {
   entities.forEach(e => e.sync());
   updateMusic(npcs.some(n => n.hostile === player && !n.downed), dt);
   updateCamera(dt);
+  updateBarrier(dt); updateWeather(dt);
   const now = performance.now() * 0.001;
   for (const f of flames) { const k = f.flicker ? 0.82 + 0.12 * Math.sin(now * 11 + f.ph) + 0.06 * Math.random() : 1; f.pl.intensity = 8 * k; f.s.scale.setScalar(1.4 * k); }
   if ((hudT += dt) > 0.05) { hudT = 0; updateHud(); }
@@ -1234,7 +1385,7 @@ function frame() {
   requestAnimationFrame(frame);
 }
 window.__game = {
-  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
+  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, setWeather, wx, barrierFlash, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
   get yaw() { return player.heading; }, set yaw(v) { player.heading = v; }, set pitch(v) { pitch = v; },
   set sneak(v) { sneakOn = v; },
 };

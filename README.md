@@ -60,6 +60,7 @@ Damage is Gothic 1's: strength + weapon damage − the target's protection again
 | `export_world.py` | world mesh + props + decals + lights of the Old Camp, with baked lighting → `world.json`, `world.bin` |
 | `export_anims.py` | Gothic's human animations + combat event frames → `anims.json` |
 | `export_ui.py` | Gothic's HUD fonts, health bar graphics and day sky textures → `ui/` |
+| `export_sky.py` | the magic barrier's dome + lightning textures, rain clouds → `barrier.json`, `ui/` |
 | `export_chars.py` | skeleton, armors, heads, weapons → `chars.json` |
 | `export_wp.py` | waypoints → `waypoints.json` |
 | `export_lines.py` | subtitle text index from `OUINFO.INF` → `all_lines.json` |
