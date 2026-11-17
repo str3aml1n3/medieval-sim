@@ -138,14 +138,15 @@ function showMsg(t, ms = 0) {
 // Gothic's baked light is stored per vertex (sRGB bytes). Converting it to linear and multiplying with the
 // (sRGB-decoded) texture reproduces Gothic's gamma-space "texture x light" modulation.
 const LIGHT_GAIN = 1.25;
-// Gothic adds an ambient term on top of the baked light, so unlit corners and hut interiors stay readable.
+// A small floor keeps pitch-black corners from going to pure black; hut interiors stay as dark as Gothic bakes them.
 // `brightness` (pause menu, like Gothic's own brightness option) lowers the gamma of the light: shadows and hut
-// interiors brighten a lot, fully lit ground hardly changes.
-const MIN_LIGHT = 72;
-let brightness = store.get('bright', 1.6);
+// interiors brighten a lot, fully lit ground hardly changes. 1.0 = Gothic's own look.
+const MIN_LIGHT = 24;
+let brightness = store.get('light', 1.0); // ('light' replaces the old 'bright' key, whose default over-lit interiors)
 const S2L = new Float32Array(256);
 const buildS2L = () => { for (let i = 0; i < 256; i++) S2L[i] = Math.pow(Math.max(i, MIN_LIGHT) / 255, 2.2 / brightness); };
 buildS2L();
+const PORTAL_FADE = [8, 20]; // metres: invisible nearer than 8 m, solid beyond 20 m
 const litMeshes = []; // [raw light bytes, colour attribute] per world mesh, re-lit when the brightness changes
 const tris = []; // {a,b,c,n,tri,c8 (light bytes),col,kind}
 const CELL = 3, grid = new Map();
@@ -168,8 +169,8 @@ for (const m of world.meshes) {
   g.setAttribute('position', new THREE.BufferAttribute(P, 3));
   g.setAttribute('uv', new THREE.BufferAttribute(U, 2));
   g.setAttribute('color', new THREE.BufferAttribute(C, 3)); litMeshes.push([C8, g.attributes.color]);
-  const water = m.flag === 'water', decal = m.flag.startsWith('decal'), cut = m.alpha || m.flag === 'decal';
-  const blended = water || (decal && m.flag !== 'decal'), mul = m.flag === 'decal_mul' || m.flag === 'decal_mul2';
+  const water = m.flag === 'water', decal = m.flag.startsWith('decal'), cut = m.alpha || m.flag === 'decal', portal = m.flag === 'portal';
+  const blended = water || portal || (decal && m.flag !== 'decal'), mul = m.flag === 'decal_mul' || m.flag === 'decal_mul2';
   const mat = new THREE.MeshBasicMaterial({
     map: getTex(m.tex), vertexColors: !mul, color: mul ? 0xffffff : new THREE.Color(LIGHT_GAIN, LIGHT_GAIN, LIGHT_GAIN),
     alphaTest: cut ? 0.5 : 0, side: cut || blended ? THREE.DoubleSide : THREE.FrontSide,
@@ -180,6 +181,13 @@ for (const m of world.meshes) {
   if (mul) Object.assign(mat, { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor,
     blendDst: m.flag === 'decal_mul2' ? THREE.SrcColorFactor : THREE.ZeroFactor });
   if (decal) { mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -2; }
+  // Gothic's doorway portals (OC_W_FARDOOR, OC_W_HUETTENTOR...) are a stand-in seen from afar: they fade out as the
+  // camera comes near, so up close you look and walk straight into the hut
+  if (portal) mat.onBeforeCompile = sh => {
+    sh.vertexShader = 'varying float vCamDist;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vCamDist = -mvPosition.z;');
+    sh.fragmentShader = 'varying float vCamDist;\n' + sh.fragmentShader.replace('#include <alphatest_fragment>',
+      '#include <alphatest_fragment>\n  diffuseColor.a *= smoothstep(' + PORTAL_FADE[0].toFixed(1) + ', ' + PORTAL_FADE[1].toFixed(1) + ', vCamDist);');
+  };
   scene.add(new THREE.Mesh(g, mat));
   // collide only with solid, opaque geometry: not foliage/fences (alpha), door curtains, open doors, decals, water
   if (m.alpha || m.flag) continue;
@@ -190,7 +198,7 @@ for (const m of world.meshes) {
   }
 }
 function setBrightness(b) {
-  brightness = b; store.set('bright', b); buildS2L();
+  brightness = b; store.set('light', b); buildS2L();
   for (const [c8, attr] of litMeshes) { const a = attr.array; for (let i = 0; i < a.length; i++) a[i] = S2L[c8[i]]; attr.needsUpdate = true; }
   for (const t of tris) t.col.setRGB(S2L[t.c8[0]], S2L[t.c8[1]], S2L[t.c8[2]]);
 }
