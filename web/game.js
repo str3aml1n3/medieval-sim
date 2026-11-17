@@ -25,14 +25,30 @@ const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 60
 addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 // characters are lit by a sky/ground hemisphere + sun, then tinted by Gothic's baked light where they stand
 scene.add(new THREE.HemisphereLight(0xe4ecf4, 0x6a5a40, 1.5));
-const sun = new THREE.DirectionalLight(0xfff0d8, 1.4); sun.position.set(-30, 60, 20); scene.add(sun);
+const sun = new THREE.DirectionalLight(0xfff0d8, 1.4); sun.position.set(-50, 45, 20); scene.add(sun);
+// Gothic's day sky: two scrolling cloud layers on a flat sky plane (SKYDAY_LAYER0 = opaque base tinted sky blue,
+// SKYDAY_LAYER1 = alpha clouds over it), fading into the fog colour at the horizon. Math is done in sRGB, like Gothic.
+const skyTex = n => { const t = new THREE.TextureLoader().load(E + 'ui/' + n + '.png'); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t; };
+const fogSRGB = new THREE.Vector3(((FOG >> 16) & 255) / 255, ((FOG >> 8) & 255) / 255, (FOG & 255) / 255);
+const SUN_DIR = sun.position.clone().normalize();
 const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 32, 16), new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false, fog: false,
-  uniforms: { top: { value: new THREE.Color(0x4f7fb5) }, bottom: { value: new THREE.Color(FOG) } },
+  uniforms: { l0: { value: skyTex('SKYDAY_LAYER0_A0') }, l1: { value: skyTex('SKYDAY_LAYER1_A0') }, fogc: { value: fogSRGB }, time: { value: 0 } },
   vertexShader: 'varying vec3 vp; void main(){ vp = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-  fragmentShader: 'uniform vec3 top; uniform vec3 bottom; varying vec3 vp; void main(){ float h = clamp(normalize(vp).y * 2.2, 0.0, 1.0); gl_FragColor = vec4(mix(bottom, top, h), 1.0); \n#include <colorspace_fragment>\n}',
+  fragmentShader: `uniform sampler2D l0, l1; uniform vec3 fogc; uniform float time; varying vec3 vp;
+    void main(){
+      vec3 d = normalize(vp);
+      vec2 uv = d.xz / (max(d.y, 0.0) + 0.12);              // flat sky plane seen from below
+      vec3 base = texture2D(l0, uv * 0.55 + vec2(time * 0.004, time * 0.0015)).rgb * vec3(0.72, 0.95, 1.42);
+      vec4 cl = texture2D(l1, uv * 0.8 + vec2(time * 0.009, time * 0.003));
+      vec3 c = mix(base, cl.rgb * vec3(0.96, 0.97, 1.0), cl.a * 0.85);
+      gl_FragColor = vec4(mix(fogc, c, smoothstep(0.0, 0.28, d.y)), 1.0);
+    }`,
 }));
 sky.renderOrder = -1; scene.add(sky);
+// the sun (UNSUN5: additive, black background) in the direction of the sun light
+const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: skyTex('UNSUN5'), blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false, transparent: true }));
+sunSprite.position.copy(SUN_DIR).multiplyScalar(380); sunSprite.scale.set(90, 90, 1); sunSprite.renderOrder = -1; sky.add(sunSprite);
 
 // ---------------------------------------------------------------- loading
 const jget = u => fetch(E + u).then(r => { if (!r.ok) throw new Error(u); return r.json(); });
@@ -122,17 +138,23 @@ function showMsg(t, ms = 0) {
 // Gothic's baked light is stored per vertex (sRGB bytes). Converting it to linear and multiplying with the
 // (sRGB-decoded) texture reproduces Gothic's gamma-space "texture x light" modulation.
 const LIGHT_GAIN = 1.25;
-// Gothic adds an ambient term on top of the baked light, so unlit corners and hut interiors stay readable
+// Gothic adds an ambient term on top of the baked light, so unlit corners and hut interiors stay readable.
+// `brightness` (pause menu, like Gothic's own brightness option) lowers the gamma of the light: shadows and hut
+// interiors brighten a lot, fully lit ground hardly changes.
 const MIN_LIGHT = 72;
-const S2L = Float32Array.from({ length: 256 }, (_, i) => Math.pow(Math.max(i, MIN_LIGHT) / 255, 2.2));
-const tris = []; // {a,b,c,n,tri,col,kind}
+let brightness = store.get('bright', 1.6);
+const S2L = new Float32Array(256);
+const buildS2L = () => { for (let i = 0; i < 256; i++) S2L[i] = Math.pow(Math.max(i, MIN_LIGHT) / 255, 2.2 / brightness); };
+buildS2L();
+const litMeshes = []; // [raw light bytes, colour attribute] per world mesh, re-lit when the brightness changes
+const tris = []; // {a,b,c,n,tri,c8 (light bytes),col,kind}
 const CELL = 3, grid = new Map();
 const key = (cx, cz) => cx * 8192 + cz;
 const kindOf = t => /WOOD|HOLZ|BRETT|PLANK|BOARD|BEAM|BALK|PALISAD/.test(t) ? 'WOOD' : /STONE|STEIN|ROCK|FELS|MAUER|WALL|CASTLE|BURG|PFLASTER/.test(t) ? 'STONE' : /SAND/.test(t) ? 'SAND' : 'EARTH';
-function addTri(a, b, c, col, kind) {
+function addTri(a, b, c, c8, kind) {
   const n = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
   const l = n.length(); if (l < 1e-6) return; n.divideScalar(l);
-  const idx = tris.push({ a, b, c, n, tri: new THREE.Triangle(a, b, c), col, kind }) - 1;
+  const idx = tris.push({ a, b, c, n, tri: new THREE.Triangle(a, b, c), c8, col: new THREE.Color(S2L[c8[0]], S2L[c8[1]], S2L[c8[2]]), kind }) - 1;
   const x0 = Math.min(a.x, b.x, c.x), x1 = Math.max(a.x, b.x, c.x), z0 = Math.min(a.z, b.z, c.z), z1 = Math.max(a.z, b.z, c.z);
   for (let cx = Math.floor(x0 / CELL); cx <= Math.floor(x1 / CELL); cx++)
     for (let cz = Math.floor(z0 / CELL); cz <= Math.floor(z1 / CELL); cz++) {
@@ -145,7 +167,7 @@ for (const m of world.meshes) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(P, 3));
   g.setAttribute('uv', new THREE.BufferAttribute(U, 2));
-  g.setAttribute('color', new THREE.BufferAttribute(C, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(C, 3)); litMeshes.push([C8, g.attributes.color]);
   const water = m.flag === 'water', decal = m.flag.startsWith('decal'), cut = m.alpha || m.flag === 'decal';
   const blended = water || (decal && m.flag !== 'decal'), mul = m.flag === 'decal_mul' || m.flag === 'decal_mul2';
   const mat = new THREE.MeshBasicMaterial({
@@ -163,9 +185,14 @@ for (const m of world.meshes) {
   if (m.alpha || m.flag) continue;
   const kind = kindOf(m.tex);
   for (let i = 0; i < m.n * 3; i += 9) {
-    const col = new THREE.Color((C[i] + C[i + 3] + C[i + 6]) / 3, (C[i + 1] + C[i + 4] + C[i + 7]) / 3, (C[i + 2] + C[i + 5] + C[i + 8]) / 3);
-    addTri(new THREE.Vector3(P[i], P[i + 1], P[i + 2]), new THREE.Vector3(P[i + 3], P[i + 4], P[i + 5]), new THREE.Vector3(P[i + 6], P[i + 7], P[i + 8]), col, kind);
+    const c8 = [0, 1, 2].map(k => Math.round((C8[i + k] + C8[i + 3 + k] + C8[i + 6 + k]) / 3));
+    addTri(new THREE.Vector3(P[i], P[i + 1], P[i + 2]), new THREE.Vector3(P[i + 3], P[i + 4], P[i + 5]), new THREE.Vector3(P[i + 6], P[i + 7], P[i + 8]), c8, kind);
   }
+}
+function setBrightness(b) {
+  brightness = b; store.set('bright', b); buildS2L();
+  for (const [c8, attr] of litMeshes) { const a = attr.array; for (let i = 0; i < a.length; i++) a[i] = S2L[c8[i]]; attr.needsUpdate = true; }
+  for (const t of tris) t.col.setRGB(S2L[t.c8[0]], S2L[t.c8[1]], S2L[t.c8[2]]);
 }
 function cellTris(x, z) { return grid.get(key(Math.floor(x / CELL), Math.floor(z / CELL))) || []; }
 function nearTris(x, z, r) {
@@ -226,14 +253,36 @@ function segCast(a, b) {
   }
   return best;
 }
+const GRAVITY = 20, JUMP_GRAVITY = 14;
 function settle(e, dt) {
-  const g = groundAt(e.pos.x, e.pos.z, e.pos.y + 0.2);
-  if (g === null) { e.vy -= 20 * dt; e.pos.y += e.vy * dt; if (e.pos.y < e.lastGood - 30) { e.pos.y = e.lastGood; e.vy = 0; } return; }
-  if (gTri >= 0) e.lightTarget.copy(tris[gTri].col);
+  const g = groundAt(e.pos.x, e.pos.z, e.pos.y + 0.2), gi = gTri;
+  if (g !== null) { e.groundY = g; if (gi >= 0) { e.groundN.copy(tris[gi].n); e.lightTarget.copy(tris[gi].col); } }
+  else e.groundY = e.pos.y - 9;
+  if (e.air) { // jumping: ballistic until the feet are back on a floor
+    e.vy -= JUMP_GRAVITY * dt; e.pos.y += e.vy * dt;
+    if (g !== null && e.vy <= 0 && e.pos.y <= g) { e.pos.y = g; e.vy = 0; e.air = false; landed(e); }
+    else if (e.pos.y < e.lastGood - 30) { e.pos.y = e.lastGood; e.vy = 0; e.air = false; landed(e); }
+    gTri = gi; return;
+  }
+  if (g === null) { e.vy -= GRAVITY * dt; e.pos.y += e.vy * dt; fallTick(e, dt); if (e.pos.y < e.lastGood - 30) { e.pos.y = e.lastGood; e.vy = 0; } return; }
   // stick to the ground when walking down slopes/steps instead of bouncing in free fall
-  if (e.pos.y > g + 0.05 && (e.vy < -0.5 || e.pos.y > g + 0.45)) { e.vy -= 20 * dt; e.pos.y = Math.max(g, e.pos.y + e.vy * dt); if (e.pos.y === g) e.vy = 0; }
-  else { e.pos.y = g; e.vy = 0; }
-  e.lastGood = e.pos.y;
+  if (e.pos.y > g + 0.05 && (e.vy < -0.5 || e.pos.y > g + 0.45)) { e.vy -= GRAVITY * dt; e.pos.y = Math.max(g, e.pos.y + e.vy * dt); if (e.pos.y === g) { e.vy = 0; landed(e); } else fallTick(e, dt); }
+  else { if (e.fallT) landed(e); e.pos.y = g; e.vy = 0; }
+  e.lastGood = e.pos.y; gTri = gi;
+}
+// walked off a ledge: after a moment in the air Gothic switches to its falling pose
+function fallTick(e, dt) {
+  e.fallT = (e.fallT || 0) + dt;
+  if (e.fallT > 0.3 && !e.act && !e.downed) { e.act = { type: 'fall', id: ++actId, t: 0 }; e.play('S_FALLDN', { blend: 0.25, fixY: true }); }
+}
+function landed(e) {
+  const a = e.act, fell = e.fallT || 0; e.fallT = 0;
+  if (!a || (a.type !== 'jump' && a.type !== 'fall')) return;
+  sfx.step(e, 0.6);
+  // landing from a running jump while still running: straight back into the run, otherwise Gothic's landing clip
+  if (a.type === 'jump' && a.fwd && e.mv.f > 0) { e.act = null; return; }
+  e.act = { type: 'land', id: ++actId, t: 0 };
+  e.play(a.type === 'jump' && a.fwd ? 'T_JUMP_2_STAND' : 'T_FALLDN_2_STAND', { loop: false, blend: 0.08, rate: fell > 0.8 || a.type === 'jump' ? 1 : 1.6 });
 }
 
 // ---------------------------------------------------------------- audio
@@ -303,6 +352,14 @@ function rootXZ(c, f) {
 const smooth = x => x * x * (3 - 2 * x);
 
 // ---------------------------------------------------------------- characters
+// Gothic draws a soft dark blob under each character; it lies on the floor triangle below and fades with height
+const blobTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(0,0,0,.9)'); gr.addColorStop(0.5, 'rgba(0,0,0,.7)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c);
+})();
+const blobGeo = new THREE.PlaneGeometry(1.4, 1.4).rotateX(-Math.PI / 2);
+const _up = new THREE.Vector3(0, 1, 0);
 function skinGeo(p) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(p.p, 3));
@@ -312,6 +369,7 @@ function skinGeo(p) {
 }
 const geoCache = new Map();
 const gGeo = p => { if (!geoCache.has(p)) geoCache.set(p, skinGeo(p)); return geoCache.get(p); };
+let STAND_Y = 0.977; // root height of Gothic's standing pose (S_RUN), set below
 let FOOT_ADJ = 0; // lifts the model so the soles touch the ground in Gothic's standing pose (computed below)
 const tmpPose = new Float32Array(NB * 4);
 let actId = 0;
@@ -347,16 +405,18 @@ class Char {
     rest.forEach((r, i) => r.q.toArray(this.cur, i * 4));
     this.rootY = 1; this.snapY = 1; this.blendT = 0; this.blendDur = 0; this.base = null; this.over = null;
     scene.add(this.root);
+    this.shadow = new THREE.Mesh(blobGeo, new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+    this.shadow.renderOrder = 1; this.groundY = 0; this.groundN = new THREE.Vector3(0, 1, 0); scene.add(this.shadow);
   }
   slot(inHand) { this.bones[boneIdx[inHand ? 'ZS_RIGHTHAND' : 'ZS_SWORD']].add(this.weapon); }
   get fwd() { return new THREE.Vector3(-Math.sin(this.heading), 0, -Math.cos(this.heading)); }
   // base layer: one full-body clip, cross-faded from the previous pose
-  play(name, { loop = true, rate = 1, rev = false, blend = 0.15, rm = false, restart = false } = {}) {
+  play(name, { loop = true, rate = 1, rev = false, blend = 0.15, rm = false, restart = false, fixY = false } = {}) {
     const clip = clipOf(name, this.style); if (!clip) { console.warn('missing clip', name); return false; }
     const b = this.base;
     if (!restart && b && b.clip === clip && b.rev === rev && b.loop === loop) { b.rate = rate; return true; }
     this.snap.set(this.cur); this.snapY = this.rootY; this.blendT = 0; this.blendDur = blend;
-    this.base = { clip, name, t: 0, rate, loop, rev, rm, prevF: rev ? clip.n - 1 : 0 };
+    this.base = { clip, name, t: 0, rate, loop, rev, rm, fixY, prevF: rev ? clip.n - 1 : 0 };
     return true;
   }
   // overlay layer: a partial clip (upper body etc.) mixed on top, faded in and out
@@ -368,7 +428,7 @@ class Char {
     if (b) { b.prevF = frameAt(b); b.t += dt * b.rate; }
     rest.forEach((r, i) => r.q.toArray(this.cur, i * 4));
     let y = this.rootY;
-    if (b) { const ry = sample(b.clip, frameAt(b), b.loop, this.cur); if (ry !== null) y = ry; }
+    if (b) { const ry = sample(b.clip, frameAt(b), b.loop, this.cur); if (ry !== null) y = b.fixY ? STAND_Y : ry; }
     if (this.blendT < this.blendDur) {
       this.blendT += dt; const w = smooth(Math.min(1, this.blendT / this.blendDur));
       for (let i = 0; i < NB; i++) THREE.Quaternion.slerpFlat(this.cur, i * 4, this.snap, i * 4, this.cur, i * 4, w);
@@ -398,7 +458,12 @@ class Char {
     const [x1, z1] = rootXZ(b.clip, frameAt(b)), [x0, z0] = rootXZ(b.clip, b.prevF);
     return [x1 - x0, z1 - z0];
   }
-  sync() { this.root.position.copy(this.pos); this.root.rotation.y = this.heading; }
+  sync() {
+    this.root.position.copy(this.pos); this.root.rotation.y = this.heading;
+    const h = this.pos.y - this.groundY, sh = this.shadow; sh.visible = h < 4;
+    sh.position.set(this.pos.x, this.groundY + 0.02, this.pos.z); sh.quaternion.setFromUnitVectors(_up, this.groundN);
+    sh.material.opacity = clamp(1 - h / 4, 0, 1); sh.scale.setScalar(this.downed ? 1.5 : 1 + h * 0.15);
+  }
 }
 
 // feet: in the bind pose the soles sit `sole` below the foot bone; pose a test model and lift it accordingly
@@ -407,9 +472,9 @@ class Char {
   const tmp = new Char({ outfit: 'GRDM', head: 'BALD', weapon: 'sword' });
   const v = new THREE.Vector3(), feet = ['BIP01 L FOOT', 'BIP01 R FOOT'].map(n => tmp.bones[boneIdx[n]]);
   tmp.root.updateMatrixWorld(true); const sole = feet[0].getWorldPosition(v).y - mn;
-  tmp.play('S_RUN', { blend: 0 }); tmp.update(0); tmp.root.updateMatrixWorld(true);
+  tmp.play('S_RUN', { blend: 0 }); tmp.update(0); tmp.root.updateMatrixWorld(true); STAND_Y = tmp.rootY;
   FOOT_ADJ = -Math.min(...feet.map(f => f.getWorldPosition(v).y - sole));
-  scene.remove(tmp.root);
+  scene.remove(tmp.root); scene.remove(tmp.shadow);
 }
 
 // ---------------------------------------------------------------- movement (Gothic: run by default, Shift walks, sneak toggles)
@@ -558,6 +623,19 @@ function parade(c) {
   if (c.downed || c.drawing || (c.act && c.act.type !== 'parade')) return;
   c.play('T_1HPARADE_O', { loop: false, restart: true, blend: 0.06 }); c.act = { type: 'parade', id: ++actId, t: 0 };
 }
+// Gothic's jump: forward from a run/walk (T_RUNL_2_JUMP, then S_JUMP while still in the air), straight up when
+// standing (T_STAND_2_JUMPUP -> S_JUMPUP -> S_FALLDN). The arc is physics; the clips' own root height is ignored.
+function jump(c) {
+  if (c.air || c.downed || c.drawing || c.act || c.vy !== 0) return;
+  const fwd = c.mv.f > 0, sp = fwd ? (c.gait === 'run' ? 5 : 3.2) : 0, h = c.heading;
+  c.air = true; c.vy = fwd ? 4.6 : 5.0;
+  c.act = { type: 'jump', id: ++actId, t: 0, fwd, vx: -Math.sin(h) * sp, vz: -Math.cos(h) * sp };
+  c.play(fwd ? 'T_RUNL_2_JUMP' : 'T_STAND_2_JUMPUP', { loop: false, blend: 0.08, fixY: true });
+}
+function jumpTick(c, a, dt) {
+  if (a.vx || a.vz) { const x = c.pos.x, z = c.pos.z; moveBy(c, a.vx * dt, a.vz * dt); if (c.pos.x === x && c.pos.z === z) a.vx = a.vz = 0; }
+  if (c.done()) c.play(a.fwd ? 'S_JUMP' : c.vy > 0 ? 'S_JUMPUP' : 'S_FALLDN', { blend: 0.15, fixY: true });
+}
 function jumpBack(c) {
   if (c.downed || c.drawing || c.act) return;
   c.play('T_1HPARADEJUMPB', { loop: false, rm: true, restart: true, blend: 0.06 }); c.act = { type: 'jumpb', id: ++actId, t: 0 };
@@ -616,6 +694,8 @@ function tickAction(c, dt) {
   const a = c.act; if (!a) return;
   a.t += dt;
   if (a.type === 'attack') return attackTick(c, a);
+  if (a.type === 'jump') return jumpTick(c, a, dt);
+  if (a.type === 'fall') return;
   if (a.type === 'down') {
     if (a.phase === 'fall') { if (!a.snd && c.frame() > 44) { a.snd = true; sfx.fall(c); } if (c.done()) { a.phase = 'lie'; a.t = 0; c.play('S_WOUNDED', { blend: 0.3 }); } }
     else if (a.t > a.until) getUp(c);
@@ -629,7 +709,7 @@ function tickAction(c, dt) {
 const keys = {}; let pitch = 0.22, lockedUI = false, sneakOn = false, rmb = false;
 let sens = store.get('sens', 1);
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
-addEventListener('keydown', e => { if (MOVE_KEYS.includes(e.code) || e.code === 'Space') e.preventDefault(); if (!e.repeat) onKey(e); keys[e.code] = true; });
+addEventListener('keydown', e => { if (MOVE_KEYS.includes(e.code) || e.code === 'Space' || e.key === 'Alt') e.preventDefault(); if (!e.repeat) onKey(e); keys[e.code] = true; });
 addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; rmb = false; });
 function lockPointer() {
@@ -679,6 +759,8 @@ $('btnRestart').addEventListener('click', () => { restartArena(); setPaused(fals
 $('volMusic').addEventListener('input', e => { musicVol = e.target.value / 100; if (musicVol > 0 && !musicOn) musicOn = true; applyMusicLevel(); });
 $('volSfx').addEventListener('input', e => listener.setMasterVolume(e.target.value / 100));
 $('sens').value = Math.round(sens * 100);
+$('bright').value = Math.round(brightness * 100);
+$('bright').addEventListener('input', e => setBrightness(e.target.value / 100));
 $('sens').addEventListener('input', e => { sens = e.target.value / 100; store.set('sens', sens); });
 const STYLE_NAMES = { '': 'untrained', '1HST1': 'trained', '1HST2': 'master' };
 function setStyle(s) { player.style = s; store.set('style', s); $('style').textContent = STYLE_NAMES[s]; }
@@ -686,7 +768,7 @@ setStyle(player.style in STYLE_NAMES ? player.style : '');
 function restartArena() {
   if (convo) closeConvo();
   for (const c of entities) {
-    Object.assign(c, { downed: false, act: null, drawing: null, hostile: null, vy: 0, hp: c.maxHp, over: null, lookT: 0, warn: 0, weapT: 0 });
+    Object.assign(c, { downed: false, act: null, drawing: null, hostile: null, vy: 0, air: false, fallT: 0, hp: c.maxHp, over: null, lookT: 0, warn: 0, weapT: 0 });
     c.drawn = false; c.slot(false); c.play(c.isPlayer ? 'S_RUN' : 'S_RUN', { blend: 0 });
   }
   player.pos.copy(PLAYER_START()); player.heading = Math.PI * 0.75; showMsg('');
@@ -743,6 +825,7 @@ function onKey(e) {
   const p = player;
   if (e.code === 'KeyE' && !p.downed && !p.drawn) { const n = nearestTalker(); if (n) openMenu(n); }
   if ((e.code === 'Space' || e.code === 'KeyF') && !p.downed) toggleWeapon(p);
+  if (e.code === 'AltLeft' || e.code === 'AltRight' || e.code === 'KeyV') jump(p);
   if (e.code === 'KeyC' || e.code === 'NumpadMultiply') { sneakOn = !sneakOn; flash(sneakOn ? 'Sneaking' : 'Running'); }
   if (e.code === 'KeyT') { const order = ['', '1HST1', '1HST2']; setStyle(order[(order.indexOf(p.style) + 1) % 3]); flash('One-handed: ' + STYLE_NAMES[p.style]); }
   if (e.code === 'KeyM') toggleMusic();
@@ -778,7 +861,7 @@ function turnTo(n, p, dt, rate = 6) {
 function perceive(n, dt) {
   const p = player; if (p.downed) return;
   const d = dist2(n, p), sees = d < 9 && n.fwd.dot(dirTo(n, p)) > 0.15, moving = p.mv.f || p.mv.s;
-  const noise = p.act && p.act.type === 'attack' ? 10 : moving ? { run: 7, walk: 2.5, sneak: 0 }[p.gait] : 0;
+  const noise = p.act && p.act.type === 'attack' ? 10 : p.air ? 6 : moving ? { run: 7, walk: 2.5, sneak: 0 }[p.gait] : 0;
   if (d < noise || (sees && d < 2.5)) n.lookT = Math.max(n.lookT || 0, 2.5);
   if (p.gait === 'sneak' && moving && sees && d < 6 && !(n.sneakCd > 0)) { bark(n, 'WHATAREYOUDOING'); n.sneakCd = 15; n.lookT = 4; }
   n.sneakCd = (n.sneakCd || 0) - dt;
@@ -841,9 +924,10 @@ function aiStep(n, dt) {
 }
 
 // ---------------------------------------------------------------- music
-// Prefers the game's own themes rendered by export_music.py (calm + fight, crossfaded by combat intensity).
+// Prefers the game's own themes rendered by export_music.py. Like Gothic, exactly one theme plays: the calm camp theme,
+// or the fight theme while someone is attacking the hero (a short crossfade when it switches).
 // Falls back to a small procedural score if those files are missing.
-let musicOn = true, mgain = null, nextNote = 0, step = 0, intensity = 0, musicVol = 0.7, procedural = false;
+let musicOn = true, mgain = null, nextNote = 0, step = 0, intensity = 0, musicVol = 0.7, procedural = false, theme = 'std', calmT = 0;
 const tracks = {};
 const musicLevel = () => (musicOn ? musicVol * (procedural ? 0.32 : 1) : 0);
 const fetchBuf = u => fetch(u).then(r => (r.ok ? r.arrayBuffer() : null)).then(b => b && actx.decodeAudioData(b)).catch(() => null);
@@ -854,7 +938,7 @@ async function startMusic() {
   if (std) {
     for (const [k, b] of [['std', std], ['fgt', fgt || std]]) {
       const s = actx.createBufferSource(); s.buffer = b; s.loop = true;
-      const g = actx.createGain(); g.gain.value = k === 'std' ? 1 : 0; s.connect(g).connect(mgain); s.start(); tracks[k] = g;
+      const g = actx.createGain(); g.gain.value = k === theme ? 1 : 0; s.connect(g).connect(mgain); s.start(); tracks[k] = g;
     }
     $('musicSrc').textContent = 'Old Camp theme';
   } else {
@@ -866,10 +950,17 @@ async function startMusic() {
 }
 function applyMusicLevel() { if (mgain) mgain.gain.setTargetAtTime(musicLevel(), actx.currentTime, 0.15); }
 function toggleMusic() { musicOn = !musicOn; applyMusicLevel(); }
-function mixMusic() { // equal-power crossfade between calm and fight themes
+// threatened = an NPC is fighting the hero. Switch to the fight theme at once, back to calm after 6 s of peace.
+function updateMusic(threatened, dt) {
+  calmT = threatened ? 0 : calmT + dt;
+  const want = threatened ? 'fgt' : calmT > 6 ? 'std' : theme;
+  intensity += ((want === 'fgt' ? 1 : 0) - intensity) * Math.min(1, dt * 0.6); // tempo of the procedural fallback
+  if (want === theme) return; theme = want;
   if (!tracks.std) return;
-  tracks.std.gain.value = Math.cos(intensity * Math.PI / 2); tracks.fgt.gain.value = Math.sin(intensity * Math.PI / 2);
+  for (const k of ['std', 'fgt']) { const g = tracks[k].gain; g.cancelScheduledValues(actx.currentTime); g.setTargetAtTime(k === theme ? 1 : 0, actx.currentTime, 0.5); }
 }
+// a hidden tab goes silent (otherwise two open tabs play two soundtracks over each other)
+document.addEventListener('visibilitychange', () => { if (document.hidden) actx.suspend(); else if (started) actx.resume(); });
 const DORIAN = [0, 2, 3, 5, 7, 9, 10], ROOT = 146.83;
 const CHORDS = [[0, 2, 4], [6, 1, 3], [3, 5, 0], [0, 2, 4]];
 const noteF = d => ROOT * Math.pow(2, (DORIAN[((d % 7) + 7) % 7] + 12 * Math.floor(d / 7)) / 12);
@@ -939,7 +1030,7 @@ function updateCamera(dt) {
   camera.position.copy(piv).addScaledVector(off, dd);
   camera.lookAt(piv);
   if (window.__dbgCam) { camera.position.copy(window.__dbgCam.pos); camera.lookAt(window.__dbgCam.target); }
-  sky.position.copy(camera.position);
+  sky.position.copy(camera.position); sky.material.uniforms.time.value = clock.elapsedTime;
 }
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -968,8 +1059,7 @@ function frame() {
     if (d < 0.75 && d > 1e-4) { n.pos.x += (dx / d) * (0.75 - d) * 0.5; n.pos.z += (dz / d) * (0.75 - d) * 0.5; }
   }
   entities.forEach(e => e.sync());
-  const fighting = npcs.some(n => n.hostile && !n.downed);
-  intensity += ((fighting ? 1 : 0) - intensity) * Math.min(1, dt * 0.6); mixMusic();
+  updateMusic(npcs.some(n => n.hostile === player && !n.downed), dt);
   updateCamera(dt);
   const now = performance.now() * 0.001;
   for (const f of flames) { const k = f.flicker ? 0.82 + 0.12 * Math.sin(now * 11 + f.ph) + 0.06 * Math.random() : 1; f.pl.intensity = 8 * k; f.s.scale.setScalar(1.4 * k); }
@@ -978,7 +1068,7 @@ function frame() {
   requestAnimationFrame(frame);
 }
 window.__game = {
-  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
+  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
   get yaw() { return player.heading; }, set yaw(v) { player.heading = v; }, set pitch(v) { pitch = v; },
   set sneak(v) { sneakOn = v; },
 };

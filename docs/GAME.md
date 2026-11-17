@@ -13,13 +13,19 @@ reads the JSON/BIN/PNG/WAV files from `../export/`. If they're missing or from a
 ## World rendering
 Each world mesh is `MeshBasicMaterial` with **vertex colours**: Gothic's baked light (per-vertex light, or a
 lightmap sampled at export). The bytes are converted from sRGB to linear so that texture × light matches Gothic's
-gamma-space modulation; `MIN_LIGHT` adds Gothic's ambient floor so hut interiors stay readable, and `LIGHT_GAIN`
-scales the result. Alpha textures (foliage, fences) are alpha-tested and double-sided; decals blend like
+gamma-space modulation; `MIN_LIGHT` adds Gothic's ambient floor and `LIGHT_GAIN` scales the result. The
+**brightness** setting (pause menu, default 1.6) divides the 2.2 gamma of that conversion, which brightens shadows
+and hut interiors much more than sunlit ground; changing it rewrites the vertex colours in place (`setBrightness`). Alpha textures (foliage, fences) are alpha-tested and double-sided; decals blend like
 Gothic's alpha functions (additive, multiply ×2, alpha blend); water is translucent. Textures use the GPU's maximum
-anisotropic filtering, since most ground is seen at grazing angles. A gradient sky dome follows the camera; fog hides the edge of the exported square.
+anisotropic filtering, since most ground is seen at grazing angles. Fog hides the edge of the exported square.
+
+The **sky** is Gothic's day sky: a dome following the camera whose shader projects two slowly scrolling layers onto
+a flat sky plane: `SKYDAY_LAYER0` tinted sky blue as the base, `SKYDAY_LAYER1`'s alpha clouds over it, fading into the
+fog colour at the horizon. The `UNSUN5` sun sprite sits in the direction of the sun light.
 
 Characters use Lambert materials lit by a hemisphere light + sun, and are **tinted by the baked light of the floor
-triangle they stand on**, so they darken indoors. The 7 dynamic light vobs (torches, fires) become flickering point
+triangle they stand on**, so they darken indoors. Like in Gothic, each character casts a **blob shadow**: a soft dark
+disc on the floor triangle below it, tilted to its slope, fading and growing while the character is in the air. The 7 dynamic light vobs (torches, fires) become flickering point
 lights + glow sprites.
 
 ## Collision (`groundAt`, `pushOut`, `canStand`, `settle`, `segCast`)
@@ -59,6 +65,14 @@ master overlay scripts, which replace the attack, parade and stance clips.
 | sneak | toggle C | 0.77 m/s (`S_SNEAKL`), 1.17 m/s weapon drawn |
 | back | S | walk clip reversed; with a weapon drawn, S is a jump back (`T_1HPARADEJUMPB`) |
 | strafe | A / D | `T_*STRAFEL/R` clips |
+| jump | Alt or V | moving forward: `T_RUNL_2_JUMP` → `S_JUMP` → `T_JUMP_2_STAND`; standing: `T_STAND_2_JUMPUP` → `S_JUMPUP` → `S_FALLDN` → `T_FALLDN_2_STAND` |
+
+**Jumping and falling.** A jump launches the character ballistically (`air`, gravity 14 m/s², 4.6–5 m/s up, 5 m/s
+forward from a run, 3.2 from a walk); horizontal movement still goes through the wall collision, and it lands when
+the feet reach a floor again (`settle` → `landed`). Clips flagged `fixY` keep the standing root height, so the arc
+comes from the physics and not twice from the clip. Still holding forward after a running jump goes straight back
+into the run. Walking off a ledge switches to `S_FALLDN` after 0.3 s in the air and plays `T_FALLDN_2_STAND` on
+landing.
 
 The mouse turns the hero (Gothic's mouse control); the camera is rigidly behind him, its pivot only smoothed
 vertically. Mouse deltas above 300 px/event are dropped (a Chrome-on-Windows pointer-lock glitch) and pointer lock
@@ -100,7 +114,10 @@ subtitle; the NPC gestures with Gothic's dialogue gesture clips. Keys **1–7** 
 - **Positional** effects and barks (`THREE.PositionalAudio`): footsteps by ground material and gait, Gothic's
   weapon-on-flesh / weapon-on-weapon collision sounds, body fall, a synthesised sword whoosh.
 - **Voice**: one non-positional `THREE.Audio`; a new line stops the previous one.
-- **Music**: `oc_std` and `oc_fgt` crossfaded by combat intensity; procedural fallback if missing.
+- **Music**: like Gothic, one theme at a time: the camp theme `oc_std`, or the fight theme `oc_fgt` while an NPC
+  is fighting the hero (watching the arena duel doesn't count). It switches to fight music at once and back to calm
+  after 6 s of peace, with a short crossfade. A hidden browser tab suspends all audio, so two open tabs never play
+  over each other. Procedural fallback if the WAVs are missing.
 
 ## HUD (Gothic's own graphics)
 Text is drawn in Gothic's bitmap fonts: `setText(el, [[text, font], …], maxWidth)` lays glyphs out from
@@ -112,12 +129,13 @@ export) the text falls back to plain CSS. The pause-menu legend is still CSS tex
 
 ## Pause menu
 **Esc** (the browser releases the mouse, and `pointerlockchange` opens the menu) or **P**. While paused the world
-is frozen. The menu has the controls legend, volumes, mouse speed, the current one-handed talent, Resume and Restart.
+is frozen. The menu has the controls legend, volumes, brightness, mouse speed, the current one-handed talent, Resume and
+Restart.
 
 ## Debug hooks
 | Hook | Effect |
 |---|---|
 | `?auto=1` | skip the start screen |
-| `window.__game` | `{ player, npcs, camera, scene, THREE, CLIPS, PIT, yaw, pitch, sneak, startAttack, parade, jumpBack, toggleWeapon, actionInput, setStyle, hurt, knockDown, startDuel }` |
+| `window.__game` | `{ player, npcs, camera, scene, THREE, CLIPS, PIT, yaw, pitch, sneak, theme, startAttack, parade, jump, jumpBack, toggleWeapon, actionInput, setStyle, setBrightness, hurt, knockDown, startDuel }` |
 | `window.__freezeAI = true` | stop NPC AI and physics (for posed screenshots) |
 | `window.__dbgCam = { pos, target }` | override the camera |

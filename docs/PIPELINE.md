@@ -10,7 +10,7 @@ Data/*.VDF ─┬─ WORLD.ZEN ───────► export_world.py ──�
             │                   ► export_wp.py ────────────────► waypoints.json
             ├─ HUMANS.MDH, *.MDM, *.MMB, *.MRM ► export_chars.py ► chars.json, tex/*.png
             ├─ HUMANS*.MDS, HUMANS*-*.MAN ─► export_anims.py ─────────────► anims.json
-            ├─ FONT_OLD_*.FNT, BAR_*.TEX ──► export_ui.py ────────────────► ui/fonts.json, ui/*.png
+            ├─ FONT_OLD_*.FNT, BAR_*.TEX, SKYDAY_*.TEX ► export_ui.py ─────► ui/fonts.json, ui/*.png
             └─ SOUND/*.WAV ─────┐
 _work/Data/scripts/_compiled/   │
    OUINFO.INF ─────────────────► export_lines.py ─────────────► all_lines.json
@@ -101,7 +101,7 @@ Gothic animates humans with `HUMANS.MDS` (model script: clip names, frame ranges
 `HUMANS-<CLIP>.MAN` per clip (per frame, per bone: local rotation quaternion + position). Fighting talents are overlay
 scripts (`HUMANS_1HST1.MDS`, `HUMANS_1HST2.MDS`) with their own `.MAN` files for attacks, parade and stance.
 
-The script exports the clips the game uses (locomotion for running/walking/sneaking, one-handed fighting, hit
+The script exports the clips the game uses (locomotion for running/walking/sneaking, jumping and falling, one-handed fighting, hit
 reactions, knock-out, spectating, guarding, dialogue gestures) plus the trained/master variants as `1HST1:<CLIP>`
 and `1HST2:<CLIP>`. Per clip: `fps`, frame count `n`, `nodes` (bone indices), `q` (rotations, x,y,z,w per frame per
 node), `root` (BIP01 translation per frame, metres), `speed` (average horizontal root speed, m/s), `layer` and `ev`:
@@ -118,6 +118,8 @@ Gothic's HUD graphics: `BAR_BACK` (status bar frame) and `BAR_HEALTH` (its red f
 `FONT_OLD_10_WHITE` / `FONT_OLD_20_WHITE` with their highlighted `_HI` variants. A `.FNT` file is a table of 256 glyphs
 indexed by Windows-1252 code, each with a pixel width and the UV corners of its cell in the font texture;
 `fonts.json` stores `{ <font>: { tex, size, height, glyphs: [[u0, v0, u1, v1, width], …] } }`.
+It also saves Gothic's day sky: `SKYDAY_LAYER0_A0` (opaque cloud base), `SKYDAY_LAYER1_A0` (alpha clouds) and the
+sun `UNSUN5`.
 
 ### `export_wp.py` → `waypoints.json`
 Waynet points inside the region: `[{ n: name, x, y, z }]`. The game uses them to place NPCs and to find the arena.

@@ -33,6 +33,7 @@ Gothic's layout, with the mouse turning the hero.
 | W / S | run forward / walk back |
 | A / D | strafe |
 | Shift (hold) | walk |
+| Alt or V | jump (forward while moving, straight up when standing) |
 | C | sneak on/off (silent: NPCs only notice what they see) |
 | Space or F | draw / sheathe weapon |
 | Left click | attack; click again as the swing ends to chain a combo (clicking too early breaks it) |
@@ -43,7 +44,7 @@ Gothic's layout, with the mouse turning the hero.
 | E, then 1–7 | talk, pick a dialogue option |
 | M | music on/off |
 | R | get up after being knocked down |
-| Esc / P | pause menu (controls, volume, mouse speed, restart) |
+| Esc / P | pause menu (controls, volume, brightness, mouse speed, restart) |
 
 ## Repository layout
 
@@ -52,7 +53,7 @@ Gothic's layout, with the mouse turning the hero.
 | `common.py` | shared config (`GOTHIC_DIR`, export region) and VFS/world helpers |
 | `export_world.py` | world mesh + props + decals + lights of the Old Camp, with baked lighting → `world.json`, `world.bin` |
 | `export_anims.py` | Gothic's human animations + combat event frames → `anims.json` |
-| `export_ui.py` | Gothic's HUD fonts and health bar graphics → `ui/` |
+| `export_ui.py` | Gothic's HUD fonts, health bar graphics and day sky textures → `ui/` |
 | `export_chars.py` | skeleton, armors, heads, weapons → `chars.json` |
 | `export_wp.py` | waypoints → `waypoints.json` |
 | `export_lines.py` | subtitle text index from `OUINFO.INF` → `all_lines.json` |

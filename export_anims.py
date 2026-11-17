@@ -15,6 +15,8 @@ BASE = [
     'S_RUN', 'S_RUNL', 'S_WALK', 'S_WALKL', 'S_SNEAK', 'S_SNEAKL',
     'T_RUNSTRAFEL', 'T_RUNSTRAFER', 'T_WALKSTRAFEL', 'T_WALKSTRAFER', 'T_SNEAKSTRAFEL', 'T_JUMPB',
     'T_RUNTURNL', 'T_RUNTURNR',
+    # jumping: forward jump from a run or a stand, jump up, falling
+    'T_RUNL_2_JUMP', 'T_STAND_2_JUMP', 'S_JUMP', 'T_JUMP_2_STAND', 'T_STAND_2_JUMPUP', 'S_JUMPUP', 'S_FALLDN', 'T_FALLDN_2_STAND',
     # one-handed weapon
     'T_RUN_2_1H', 'T_1H_2_1HRUN', 'T_MOVE_2_1HMOVE',
     'S_1HRUN', 'S_1HRUNL', 'S_1HWALKL', 'S_1HSNEAK', 'S_1HSNEAKL',
