@@ -101,6 +101,14 @@ subtitle; the NPC gestures with Gothic's dialogue gesture clips. Keys **1–7** 
 - **Voice**: one non-positional `THREE.Audio`; a new line stops the previous one.
 - **Music**: `oc_std` and `oc_fgt` crossfaded by combat intensity; procedural fallback if missing.
 
+## HUD (Gothic's own graphics)
+Text is drawn in Gothic's bitmap fonts: `setText(el, [[text, font], …], maxWidth)` lays glyphs out from
+`ui/fonts.json` onto a canvas (word-wrapped, centred), scaled with the window height like Gothic scales its
+800×600 UI. `FONT_OLD_10_WHITE` for names, prompts, subtitles and dialogue choices (the hovered choice and the
+speaker's name use the `_HI` variant), `FONT_OLD_20_WHITE` for messages and titles. Health bars are `BAR_BACK` with
+`BAR_HEALTH` inset into it: the hero's at the bottom left, the focused opponent's at the top. Without `ui/` (an older
+export) the text falls back to plain CSS. The pause-menu legend is still CSS text.
+
 ## Pause menu
 **Esc** (the browser releases the mouse, and `pointerlockchange` opens the menu) or **P**. While paused the world
 is frozen. The menu has the controls legend, volumes, mouse speed, the current one-handed talent, Resume and Restart.

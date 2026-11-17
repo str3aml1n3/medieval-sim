@@ -10,6 +10,7 @@ Data/*.VDF ─┬─ WORLD.ZEN ───────► export_world.py ──�
             │                   ► export_wp.py ────────────────► waypoints.json
             ├─ HUMANS.MDH, *.MDM, *.MMB, *.MRM ► export_chars.py ► chars.json, tex/*.png
             ├─ HUMANS*.MDS, HUMANS*-*.MAN ─► export_anims.py ─────────────► anims.json
+            ├─ FONT_OLD_*.FNT, BAR_*.TEX ──► export_ui.py ────────────────► ui/fonts.json, ui/*.png
             └─ SOUND/*.WAV ─────┐
 _work/Data/scripts/_compiled/   │
    OUINFO.INF ─────────────────► export_lines.py ─────────────► all_lines.json
@@ -108,6 +109,12 @@ frames in which the next attack input chains), converted from ASC frame numbers 
 fields `.z,.w,.x,.y`) and Gothic stores the inverse rotation. This was determined by matching every bone of
 `S_RUN`'s first frame against the `HUMANS.MDH` rest pose (median error 0.005); then the z-mirror is applied as
 `(w, −x, −y, z)`.
+
+### `export_ui.py` → `ui/fonts.json`, `ui/*.png`
+Gothic's HUD graphics: `BAR_BACK` (status bar frame) and `BAR_HEALTH` (its red fill), and the bitmap fonts
+`FONT_OLD_10_WHITE` / `FONT_OLD_20_WHITE` with their highlighted `_HI` variants. A `.FNT` file is a table of 256 glyphs
+indexed by Windows-1252 code, each with a pixel width and the UV corners of its cell in the font texture;
+`fonts.json` stores `{ <font>: { tex, size, height, glyphs: [[u0, v0, u1, v1, width], …] } }`.
 
 ### `export_wp.py` → `waypoints.json`
 Waynet points inside the region: `[{ n: name, x, y, z }]`. The game uses them to place NPCs and to find the arena.

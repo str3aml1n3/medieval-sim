@@ -8,6 +8,7 @@ step() { echo; echo "== $*"; }
 step "world (terrain, props, textures)";  ./run.sh export_world.py
 step "characters (skeleton, armors, heads, weapons)"; ./run.sh export_chars.py
 step "animations";                        ./run.sh export_anims.py
+step "HUD fonts and bars";                ./run.sh export_ui.py
 step "waypoints";                         ./run.sh export_wp.py
 step "dialogue text index";               ./run.sh export_lines.py
 step "speech, barks and sound effects";   ./run.sh export_audio.py

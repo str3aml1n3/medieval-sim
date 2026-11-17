@@ -5,8 +5,12 @@
 html,body{margin:0;height:100%;background:#111;color:#e8dcc0;font-family:Georgia,serif;overflow:hidden}
 canvas{display:block}
 #hud{position:fixed;inset:0;pointer-events:none}
-#hp{position:absolute;left:16px;bottom:16px;width:240px;height:16px;border:2px solid #8a7a50;background:#2a0f0f}
-#hpf{height:100%;background:#b33;width:100%}
+/* Gothic's status bar: BAR_BACK frame with the BAR_HEALTH fill inset into it (both 256x32) */
+.gbar{position:relative;width:calc(192px * var(--ui,1));height:calc(24px * var(--ui,1));background:url(../export/ui/BAR_BACK.png) 0 0/100% 100% no-repeat}
+.gbar .in{position:absolute;left:4.7%;right:4.7%;top:17%;bottom:17%;overflow:hidden}
+.gbar .fill{height:100%;width:100%;background:url(../export/ui/BAR_HEALTH.png) 0 0/100% 100% no-repeat}
+#hp{position:absolute;left:16px;bottom:16px}
+canvas.gt{display:inline-block;vertical-align:top}
 #help{position:absolute;right:16px;top:12px;font-size:12px;line-height:1.5;text-align:right;opacity:.8;text-shadow:0 0 4px #000}
 #sub{position:absolute;left:50%;bottom:90px;transform:translateX(-50%);max-width:70vw;text-align:center;font-size:20px;text-shadow:0 0 6px #000,0 0 3px #000}
 #sub b{color:#e0b860}
@@ -18,9 +22,9 @@ canvas{display:block}
 #start{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;z-index:5;text-align:center}
 #start h1{font-weight:normal;letter-spacing:4px;color:#e0b860}
 #ftag{position:absolute;transform:translate(-50%,-100%);font-size:15px;white-space:nowrap;text-shadow:0 0 4px #000,0 0 2px #000;display:none}
-#ehp{position:absolute;left:50%;top:44px;transform:translateX(-50%);width:240px;display:none;text-align:center;font-size:13px;text-shadow:0 0 4px #000}
-#ehp .bar{height:12px;border:2px solid #8a7a50;background:#2a0f0f;margin-top:3px}#ehpf{height:100%;background:#b33;width:100%}
-#gait{position:absolute;left:18px;bottom:40px;font-size:13px;opacity:.85;text-shadow:0 0 4px #000}
+#ehp{position:absolute;left:50%;top:44px;transform:translateX(-50%);display:none;text-align:center}
+#ehp .gbar{margin-top:2px}
+#gait{position:absolute;left:18px;bottom:calc(20px + 26px * var(--ui,1))}
 #pause{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:4}
 #pause .panel{background:rgba(18,14,8,.96);border:1px solid #8a7a50;padding:22px 28px;width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box}
 #pause h2{margin:0 0 14px;font-weight:normal;letter-spacing:3px;color:#e0b860;text-align:center}
@@ -36,13 +40,13 @@ kbd{display:inline-block;min-width:18px;padding:1px 6px;margin:1px 2px 1px 0;bor
 </style></head><body>
 <div id="hud">
  <div id="ftag"></div>
- <div id="ehp"><span id="ehpn"></span><div class="bar"><div id="ehpf"></div></div></div>
+ <div id="ehp"><div id="ehpn"></div><div class="gbar"><div class="in"><div id="ehpf" class="fill"></div></div></div></div>
  <div id="msg"></div>
  <div id="gait"></div>
  <div id="help"><kbd>Esc</kbd> menu &amp; controls</div>
  <div id="sub"></div><div id="prompt"></div>
  <div id="menu"></div>
- <div id="hp"><div id="hpf"></div></div>
+ <div id="hp" class="gbar"><div class="in"><div id="hpf" class="fill"></div></div></div>
 </div>
 <template id="legendTpl"><table class="legend">
  <tr><td>Mouse</td><td>Turn (camera stays behind you)</td></tr>
@@ -62,7 +66,7 @@ kbd{display:inline-block;min-width:18px;padding:1px 6px;margin:1px 2px 1px 0;bor
  <tr><td><kbd>R</kbd></td><td>Get back up after being knocked down</td></tr>
  <tr><td><kbd>Esc</kbd> / <kbd>P</kbd></td><td>Pause menu</td></tr>
 </table></template>
-<div id="start"><h1>THE ARENA</h1><div id="loadmsg">Loading…</div><div id="startLegend"></div></div>
+<div id="start"><h1 id="startTitle">THE ARENA</h1><div id="loadmsg">Loading…</div><div id="startLegend"></div></div>
 <div id="pause" role="dialog" aria-modal="true" aria-labelledby="pauseTitle"><div class="panel">
  <h2 id="pauseTitle">PAUSED</h2>
  <h3>Controls</h3><div id="pauseLegend"></div>

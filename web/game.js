@@ -55,6 +55,68 @@ catch (err) {
 }
 const WP = Object.fromEntries(wps.map(w => [w.n, new THREE.Vector3(w.x, w.y, w.z)]));
 
+// ---------------------------------------------------------------- Gothic UI: bitmap fonts (export_ui.py)
+// A font is an atlas + 256 glyphs indexed by Windows-1252 code: [u0, v0, u1, v1, pixel width]. *_HI = highlighted.
+const UI = { fonts: null, img: {} };
+try {
+  UI.fonts = await jget('ui/fonts.json');
+  await Promise.all(Object.values(UI.fonts).map(f => new Promise((res, rej) => { const im = new Image(); im.onload = () => { UI.img[f.tex] = im; res(); }; im.onerror = rej; im.src = E + 'ui/' + f.tex + '.png'; })));
+} catch { UI.fonts = null; } // older export without ui/: plain CSS text
+const F10 = 'FONT_OLD_10_WHITE', F10HI = 'FONT_OLD_10_WHITE_HI', F20 = 'FONT_OLD_20_WHITE';
+const CP1252 = { '€': 128, '‚': 130, '„': 132, '…': 133, '‘': 145, '’': 146, '“': 147, '”': 148, '–': 45, '—': 45, '™': 153 }; // Gothic's fonts have no dash glyphs: use '-'
+const glyphCode = ch => { const c = ch.charCodeAt(0); return c < 256 ? c : CP1252[ch] ?? 63; };
+// Gothic draws its fonts in 800x600 pixels; scale them up with the window like the original UI does
+const uiScale = () => clamp(innerHeight / 680, 1, 2.4);
+const applyUiScale = () => document.documentElement.style.setProperty('--ui', uiScale());
+applyUiScale(); addEventListener('resize', applyUiScale);
+const measure = (f, s) => { let w = 0; for (const ch of s) w += f.glyphs[glyphCode(ch)][4]; return w; };
+// segs: [[text, fontName], ...] -> canvas, word-wrapped at maxW font pixels, lines centred
+function renderText(segs, maxW = 1e9) {
+  const lines = [[]]; let lw = 0;
+  for (const [txt, fn] of segs) {
+    const f = UI.fonts[fn];
+    for (const word of String(txt).split(/(\s+)/)) {
+      if (!word) continue;
+      const sp = /^\s+$/.test(word), t = sp ? ' ' : word, w = measure(f, t);
+      if (!sp && lw > 0 && lw + w > maxW) { lines.push([]); lw = 0; }
+      if (sp && lw === 0) continue;
+      lines[lines.length - 1].push([t, f]); lw += w;
+    }
+  }
+  const H = Math.max(...segs.map(s => UI.fonts[s[1]].height));
+  const widths = lines.map(l => l.reduce((a, [t, f]) => a + measure(f, t), 0));
+  const W = Math.max(1, ...widths), k = uiScale(), dpr = devicePixelRatio || 1;
+  const cv = document.createElement('canvas'); cv.className = 'gt';
+  cv.width = Math.ceil(W * k * dpr); cv.height = Math.ceil(H * lines.length * k * dpr);
+  cv.style.width = W * k + 'px'; cv.style.height = H * lines.length * k + 'px';
+  const g = cv.getContext('2d'); g.scale(k * dpr, k * dpr); g.imageSmoothingQuality = 'high';
+  lines.forEach((l, li) => {
+    let x = (W - widths[li]) / 2;
+    for (const [t, f] of l) {
+      const im = UI.img[f.tex];
+      for (const ch of t) {
+        const [u0, v0, u1, v1, w] = f.glyphs[glyphCode(ch)];
+        if (w && u1 > u0) g.drawImage(im, u0 * im.width, v0 * im.height, (u1 - u0) * im.width, (v1 - v0) * im.height, x, li * H, w, (v1 - v0) * im.height);
+        x += w;
+      }
+    }
+  });
+  return cv;
+}
+// sets an element's text in Gothic's font (redraws only when the text changes)
+function setText(el, segs, maxW) {
+  if (typeof segs === 'string') segs = [[segs, F10]];
+  const key = JSON.stringify(segs) + '|' + maxW + '|' + uiScale(); if (el._gt === key) return; el._gt = key;
+  if (!UI.fonts) { el.textContent = segs.map(s => s[0]).join(''); return; }
+  el.textContent = '';
+  if (segs.some(s => s[0])) el.appendChild(renderText(segs, maxW));
+}
+let msgText = '';
+function showMsg(t, ms = 0) {
+  msgText = t; setText($('msg'), [[t, F20]], innerWidth * 0.8 / uiScale());
+  clearTimeout(showMsg.h); if (ms) showMsg.h = setTimeout(() => { if (msgText === t) showMsg(''); }, ms);
+}
+
 // ---------------------------------------------------------------- world + collision grid
 // Gothic's baked light is stored per vertex (sRGB bytes). Converting it to linear and multiplying with the
 // (sRGB-decoded) texture reproduces Gothic's gamma-space "texture x light" modulation.
@@ -531,9 +593,9 @@ function knockDown(t, att) {
   t.play('T_STAND_2_WOUNDED', { loop: false, rate: 1.3, blend: 0.1 });
   for (const e of entities) if (e.hostile === t) e.hostile = null;
   t.hostile = null;
-  if (t.isPlayer) { $('msg').textContent = 'You were knocked down… (R to get up)'; if (att.cast) bark(att, pick(['ITWASAGOODFIGHT', 'YEAHWELLDONE']), 1200); }
+  if (t.isPlayer) { showMsg('You were knocked down… (R to get up)'); if (att.cast) bark(att, pick(['ITWASAGOODFIGHT', 'YEAHWELLDONE']), 1200); }
   else {
-    if (att.isPlayer) { $('msg').textContent = t.name + ' is down'; setTimeout(() => { if ($('msg').textContent === t.name + ' is down') $('msg').textContent = ''; }, 3000); }
+    if (att.isPlayer) showMsg(t.name + ' is down', 3000);
     else if (att.cast) bark(att, 'ITWASAGOODFIGHT', 1200);
     const fan = npcs.find(n => n !== t && n !== att && !n.downed && !n.hostile && dist2(n, t) < 25);
     if (fan) bark(fan, 'HEDEFEATEDHIM', 2500);
@@ -542,7 +604,7 @@ function knockDown(t, att) {
 function getUp(c) {
   c.play('T_WOUNDED_2_STAND', { loop: false, rate: 2, blend: 0.2 }); c.act = { type: 'getup', id: ++actId, t: 0 };
   c.hp = c.isPlayer ? Math.max(c.hp, Math.round(c.maxHp * 0.5)) : c.maxHp;
-  if (c.isPlayer) $('msg').textContent = '';
+  if (c.isPlayer) showMsg('');
 }
 function tickAction(c, dt) {
   const a = c.act; if (!a) return;
@@ -621,12 +683,13 @@ function restartArena() {
     Object.assign(c, { downed: false, act: null, drawing: null, hostile: null, vy: 0, hp: c.maxHp, over: null, lookT: 0, warn: 0, weapT: 0 });
     c.drawn = false; c.slot(false); c.play(c.isPlayer ? 'S_RUN' : 'S_RUN', { blend: 0 });
   }
-  player.pos.copy(PLAYER_START()); player.heading = Math.PI * 0.75; $('msg').textContent = '';
+  player.pos.copy(PLAYER_START()); player.heading = Math.PI * 0.75; showMsg('');
   for (const n of npcs) n.pos.copy(n.home);
   startDuel();
 }
 $('start').addEventListener('click', async () => { $('start').style.display = 'none'; started = true; if (actx.state !== 'running') await actx.resume(); startMusic(); lockPointer(); });
-$('loadmsg').textContent = 'Click to begin';
+setText($('loadmsg'), [['Click to begin', F20]]);
+setText($('startTitle'), [['THE ARENA', F20]]); setText($('pauseTitle'), [['PAUSED', F20]]);
 
 // ---------------------------------------------------------------- dialogue
 let convo = null;
@@ -639,27 +702,31 @@ function topicLabel(t) { const pl = t.lines.find(l => l.who === 'player') || t.l
 function openMenu(n) {
   convo = { npc: n, state: 'menu' }; lockedUI = true; document.exitPointerLock(); n.talking = false;
   const m = $('menu'); m.style.display = 'block'; m.innerHTML = '';
-  const h = document.createElement('h3'); h.textContent = n.name + ' — ' + n.cast.role; m.appendChild(h);
+  const h = document.createElement('h3'); m.appendChild(h); setText(h, [[n.name + ' — ' + n.cast.role, F10HI]]);
   const opts = n.cast.topics.map(t => ({ label: topicLabel(t), run: () => playTopic(n, t) }));
   if (n.duty !== 'idle') opts.push({ label: '⚔ I challenge you to a fight!', run: () => { closeConvo(); n.hostile = player; bark(n, 'YOUASKEDFORIT'); } });
   opts.push({ label: 'Goodbye', run: closeConvo });
   n.cast.topics.forEach(t => t.lines.forEach(l => loadSound(l.wav)));
-  opts.forEach((o, i) => { const d = document.createElement('div'); d.textContent = (i + 1) + '. ' + o.label; d.onclick = o.run; m.appendChild(d); });
+  // Gothic marks the hovered choice with the highlighted font
+  opts.forEach((o, i) => {
+    const d = document.createElement('div'), label = (i + 1) + '. ' + o.label; m.appendChild(d); d.onclick = o.run;
+    setText(d, [[label, F10]]); d.onmouseenter = () => setText(d, [[label, F10HI]]); d.onmouseleave = () => setText(d, [[label, F10]]);
+  });
   convo.opts = opts;
 }
 function playTopic(n, t) {
   $('menu').style.display = 'none'; convo.state = 'talk'; let i = 0;
   const next = () => {
     if (!convo || convo.npc !== n) return;
-    if (i >= t.lines.length) { $('sub').innerHTML = ''; n.talking = false; return openMenu(n); }
+    if (i >= t.lines.length) { setText($('sub'), ''); n.talking = false; return openMenu(n); }
     const l = t.lines[i++]; n.talking = l.who === 'npc';
-    $('sub').innerHTML = '<b>' + (l.who === 'npc' ? n.name : 'You') + ':</b> ' + l.text;
+    setText($('sub'), [[(l.who === 'npc' ? n.name : 'You') + ': ', F10HI], [l.text, F10]], innerWidth * 0.6 / uiScale());
     playVoice(l.wav, () => setTimeout(next, 350));
   };
   next();
 }
-function closeConvo() { if (convo) convo.npc.talking = false; convo = null; lockedUI = false; $('menu').style.display = 'none'; $('sub').innerHTML = ''; if (voiceAudio && voiceAudio.isPlaying) { voiceAudio.onEnded = () => {}; voiceAudio.stop(); } lockPointer(); }
-function flash(t) { $('msg').textContent = t; clearTimeout(flash.h); flash.h = setTimeout(() => { if ($('msg').textContent === t) $('msg').textContent = ''; }, 2000); }
+function closeConvo() { if (convo) convo.npc.talking = false; convo = null; lockedUI = false; $('menu').style.display = 'none'; setText($('sub'), ''); if (voiceAudio && voiceAudio.isPlaying) { voiceAudio.onEnded = () => {}; voiceAudio.stop(); } lockPointer(); }
+const flash = t => showMsg(t, 2000);
 function onKey(e) {
   if (!started) return;
   if (paused) { if (e.code === 'Escape' || e.code === 'KeyP') setPaused(false); return; }
@@ -840,16 +907,16 @@ function updateHud() {
   const p = player, f = p.focus, tag = $('ftag');
   if (f && !convo) {
     const v = f.pos.clone().setY(f.pos.y + 2.05).project(camera);
-    if (v.z < 1 && v.z > 0) { tag.style.display = 'block'; tag.style.left = (v.x * 0.5 + 0.5) * innerWidth + 'px'; tag.style.top = (-v.y * 0.5 + 0.5) * innerHeight + 'px'; tag.textContent = f.name; }
+    if (v.z < 1 && v.z > 0) { tag.style.display = 'block'; tag.style.left = (v.x * 0.5 + 0.5) * innerWidth + 'px'; tag.style.top = (-v.y * 0.5 + 0.5) * innerHeight + 'px'; setText(tag, f.name); }
     else tag.style.display = 'none';
   } else tag.style.display = 'none';
   // Gothic shows the focused opponent's health at the top while you fight
   const foe = f && (p.drawn || f.hostile === p) ? f : null;
   $('ehp').style.display = foe ? 'block' : 'none';
-  if (foe) { $('ehpn').textContent = foe.name; $('ehpf').style.width = Math.max(0, (100 * foe.hp) / foe.maxHp) + '%'; }
+  if (foe) { setText($('ehpn'), foe.name); $('ehpf').style.width = Math.max(0, (100 * foe.hp) / foe.maxHp) + '%'; }
   $('hpf').style.width = Math.max(0, (100 * p.hp) / p.maxHp) + '%';
-  $('gait').textContent = sneakOn ? 'sneaking' : keys.ShiftLeft || keys.ShiftRight ? 'walking' : '';
-  const t = nearestTalker(); $('prompt').textContent = !convo && t && !p.downed && !p.drawn ? 'E — talk to ' + t.name : '';
+  setText($('gait'), sneakOn ? 'sneaking' : keys.ShiftLeft || keys.ShiftRight ? 'walking' : '');
+  const t = nearestTalker(); setText($('prompt'), !convo && t && !p.downed && !p.drawn ? 'E — talk to ' + t.name : '');
 }
 
 // ---------------------------------------------------------------- main loop
