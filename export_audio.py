@@ -41,26 +41,17 @@ def conv(name):
     with wave.open(f'export/audio/{name}.wav','wb') as o:
         o.setnchannels(1); o.setsampwidth(2); o.setframerate(rate); o.writeframes(a.tobytes())
     done.add(name); return True
-lines=json.load(open('export/all_lines.json'))
 CAST=[('KIRGO','05','Kirgo','arena fighter'),('THORUS','09','Thorus','castle guard captain'),('BLOODWYN','08','Bloodwyn','guard'),('FLETCHER','06','Fletcher','guard'),('SNAF','01','Snaf','cook'),('WHISTLER','11','Whistler','Shadow'),
       # the arena's duelists, as in Gothic: a New Camp mercenary and a Sect Camp templar
       ('KHARIM','09','Kharim','arena fighter from the New Camp'),('GORHANIS','08','Gor Hanis','arena fighter from the Sect Camp')]
+# dialogue: the authored arena story (dialogue/arena.json, see dialogue/tree.py), not Gothic's own topics.
+# Its voices are synthesised separately (tools/voice); the NPCs' combat shouts below stay Gothic's.
+from dialogue import tree as story_tree
+story=story_tree.load()
 cast=[]
 for npc,v,disp,role in CAST:
-    topics=collections.defaultdict(list)
-    for k,(who,t) in lines.items():
-        m=re.match(r'(?:INFO|DIA)_'+npc+r'_(.+)_(\d+)_(\d+)$',k)
-        if not m or m.group(2) not in (v,'15'): continue
-        topics[m.group(1)].append((int(m.group(3)),who,t,k))
-    ts=[]
-    for name,l in topics.items():
-        l.sort()
-        if len(l)>=2 and any(x[1]=='self' for x in l) and len(l)<=8:
-            ts.append({'id':name,'lines':[{'who':'npc' if x[1]=='self' else 'player','text':x[2],'wav':x[3]} for x in l]})
-    ts.sort(key=lambda t:-len(t['lines'])); ts=ts[:5]
-    for t in ts:
-        t['lines']=[ln for ln in t['lines'] if conv(ln['wav'])]
-    ts=[t for t in ts if t['lines']]
+    ts=story_tree.topics(story,npc) if npc in story['cast'] else []
+    role=story['cast'].get(npc,{}).get('role',role)
     barks={}
     for b in ['AARGH_1','AARGH_2','AARGH_3','CHEERFIGHT','THERESAFIGHT','ITWASAGOODFIGHT','DEAD','HEYYOU','FRIENDLYGREETINGS','YOUDEFEATEDMEWELL','WATCHYOURAIM','YEAHWELLDONE','OOH','SMALLTALK01','SMALLTALK02','SMALLTALK03',
               # reactions to the hero: sneaking up on them, walking around with a drawn weapon, after a duel
@@ -79,4 +70,4 @@ sfx=['SWORD_DRAW_01','SWORD_DRAW_02','SWORD_FINALHIT','SWORD_UNDRAW_01','STEP_EA
 sfx=[s for s in sfx if conv(s)]
 print('sfx',sfx,'files',len(done))
 for e in ['SVM_15_AARGH_1','SVM_15_AARGH_2','SVM_6_AARGH_3']: conv(e)
-json.dump({'cast':cast,'sfx':sfx},open('export/dialogue.json','w'),indent=0)
+json.dump({'quest':story['quest'],'cast':cast,'sfx':sfx},open('export/dialogue.json','w'),indent=0)

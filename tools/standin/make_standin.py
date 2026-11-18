@@ -6,10 +6,11 @@ clone of the repository (development, tests, CI) without a Gothic install. Write
 Nothing here is taken from Gothic: geometry, skeleton, animations, textures, fonts (rendered from Pillow's bundled
 free font) and sounds are generated. Names of files, clips, bones, waypoints and NPC ids match what web/game.js asks
 for, so the same code paths run. NPC stats mirror the extracted data so fights balance the same while developing.
-Voice lines are deliberately absent: the game shows the subtitle for 1.5 s when a voice file is missing.
+Dialogue is the authored story in dialogue/arena.json, with these placeholder names; voice lines are deliberately
+absent (the game shows each subtitle for 1.5 s when its voice file is missing).
 Needs numpy and Pillow only; deterministic (fixed seed), so re-running gives identical files.
 """
-import json, math, os, struct, wave
+import json, math, os, struct, sys, wave
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
@@ -597,26 +598,6 @@ CAST = [  # id (the game's), stand-in name, role, outfit, head, weapon, two-hand
     ('KHARIM', 'Kael', 'pit fighter', 'SLDM', 'FATBALD', 'SI_MACE', 25, 'blunt', 172, 70, 55, '1HST2'),
     ('GORHANIS', 'Hanno', 'pit fighter', 'TPLL', 'BALD', 'SI_SWORD', 20, 'edge', 184, 70, 45, '1HST2'),
 ]
-LINES = {  # placeholder dialogue: two short topics each (hero = 'player')
-    'KIRGO': [[('player', 'Hi. I\'m new here.'), ('npc', 'New faces don\'t last long. Watch the pit and learn.')],
-              [('player', 'Do you fight?'), ('npc', 'When they let me. Mostly I watch these two.')]],
-    'THORUS': [[('player', 'Who runs this place?'), ('npc', 'I keep order here. That\'s all you need to know.')],
-               [('player', 'Can I go in the hut?'), ('npc', 'Not without my say. Move along.')]],
-    'BLOODWYN': [[('player', 'What are you looking at?'), ('npc', 'Someone who might cause trouble. Don\'t.')],
-                 [('player', 'Anything happening?'), ('npc', 'The usual. Somebody bleeds, somebody pays.')]],
-    'FLETCHER': [[('player', 'Busy night?'), ('npc', 'Quiet, if you keep your blade in its sheath.')],
-                 [('player', 'Where can I sleep?'), ('npc', 'Any empty hut. Not the locked one.')]],
-    'SNAF': [[('player', 'Smells good.'), ('npc', 'Stew. Rice, mushrooms, and something you\'d rather not ask about.')],
-             [('player', 'Need anything?'), ('npc', 'Mushrooms. Five of them. Bring them and eat for free.')]],
-    'WHISTLER': [[('player', 'Who are you?'), ('npc', 'Nobody you need to remember.')],
-                 [('player', 'Any work?'), ('npc', 'Maybe. Come back when people know your name.')]],
-    'KHARIM': [[('player', 'You fight in the pit?'), ('npc', 'Every day. And I win most days.')],
-               [('player', 'Fight me.'), ('npc', 'Get in line behind Hanno.')]],
-    'GORHANIS': [[('player', 'Who\'s winning?'), ('npc', 'Ask me again when Kael is on the ground.')],
-                 [('player', 'Why do you fight?'), ('npc', 'Discipline. And the crowd likes it.')]],
-}
-
-
 def build_chars():
     outfits = {k: outfit(k) for k in ('GRDM', 'GRDL', 'GRDS', 'STTM', 'SLDM', 'TPLL', 'BODY_COOKSMITH')}
     heads = {k: head(k) for k in ('FIGHTER', 'BALD', 'FATBALD', 'THIEF', 'PSIONIC', 'PONY')}
@@ -633,12 +614,13 @@ def build_chars():
                       'ranged': None, 'style': style, 'hp': hp, 'str': st, 'prot': {'edge': prot, 'blunt': prot} if prot else {}}
     items = {'GRD_ARMOR_M': {'prot': {'edge': 55, 'blunt': 55}}, 'ITMW_1H_SWORD_01': {'dmg': 20, 'dtype': 'edge', 'range': 100}}
     save_json('chars.json', {'bones': bones, 'outfits': outfits, 'heads': heads, 'weapons': {}, 'weaponsLocal': weapons, 'items': items, 'looks': looks})
-    cast = []
+    # the same authored story as with Gothic (dialogue/arena.json); {ID} tokens become these stand-in names in game
+    sys.path.insert(0, ROOT); from dialogue import tree as story_tree
+    story = story_tree.load(); cast = []
     for cid, name, role, *_ in CAST:
-        topics = [{'id': f'T{i}', 'lines': [{'who': who, 'text': t, 'wav': f'SI_{cid}_T{i}_{j}'} for j, (who, t) in enumerate(ls)]}
-                  for i, ls in enumerate(LINES[cid])]
-        cast.append({'id': cid, 'name': name, 'role': role, 'voice': '00', 'topics': topics, 'barks': {}})
-    save_json('dialogue.json', {'cast': cast, 'sfx': SFX})
+        cast.append({'id': cid, 'name': name, 'role': story['cast'].get(cid, {}).get('role', role), 'voice': '00',
+                     'topics': story_tree.topics(story, cid) if cid in story['cast'] else [], 'barks': {}})
+    save_json('dialogue.json', {'quest': story['quest'], 'cast': cast, 'sfx': SFX})
 
 
 # ================================================================== UI: fonts and HUD graphics

@@ -105,10 +105,27 @@ asks for unaccelerated movement. Mouse speed is a pause-menu slider (stored in `
 cone (9 m). Heard/seen → the NPC turns to look. Sneaking in view → *"What are you doing?"*. A drawn weapon in view
 → *"Weapon down!"*, *"I said weapon down!"*; guards then attack (*"You asked for it"*).
 
-## Dialogue
-Press **E** near a non-hostile NPC with your weapon sheathed. The menu lists that NPC's topics (labelled by the
-hero's opening line), an optional challenge to fight, and Goodbye. Lines play their original voice WAV with a
-subtitle; the NPC gestures with Gothic's dialogue gesture clips. Keys **1–7** or clicks pick options.
+## Dialogue and the story
+Talk with the action key (or **E**) near a non-hostile NPC with your weapon sheathed. The choices are that NPC's
+topics, an optional challenge to fight, and Goodbye. Lines show a subtitle and play their voice file; the NPC
+gestures with the dialogue gesture clips. Arrows + Enter, **1–7** or clicks pick; right click skips a line.
+
+The topics are an authored story, **"The Fixed Fight"** (`dialogue/arena.json`, original writing), not Gothic's own
+conversations. Like Gothic's info conditions, a topic shows while its conditions hold (`cond.has` / `cond.not` flags)
+and, unless `once: false`, until it has been heard. When it ends it can set flags, add a journal entry, give ore, and
+trigger an effect: `fight` (this NPC attacks), `hostile:ID` (another NPC attacks after the talk), `weaken:ID:N`
+(lower an NPC's strength). `{ID}` in a text becomes that NPC's name, so the stand-in cast uses the same story.
+
+The plot: Bloodwyn keeps the arena's betting book, is deep in debt, has bet on Kharim and paid Snaf to spike Gor
+Hanis's stew. Kirgo and Fletcher hint at it, Whistler sells the truth. The hero can dump the stew (Snaf), warn Gor
+Hanis, and report Snaf's confession to Thorus (100 ore; Bloodwyn attacks), or take Bloodwyn's 50 ore and serve the
+stew (Gor Hanis really fights weakened). Topics about the camp, the Barons, the New Camp and the Brotherhood carry the
+world-building. The pause menu's **Journal** lists the quest entries and the hero's ore. Story state lives in memory
+for the session.
+
+Voices: `export_voice_refs.py` takes clips of each character's own original lines from your Gothic install, and
+`tools/voice/synth_voices.py` synthesises every story line with XTTS-v2 conditioned on them, to
+`export/audio/VO_<NPC>_<TOPIC>_<NN>.wav`. Both stay local (git-ignored). Without the files, each line shows for 1.5 s.
 
 ## Audio
 - **Positional** effects and barks (`THREE.PositionalAudio`): footsteps by ground material and gait, Gothic's

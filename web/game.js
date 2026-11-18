@@ -976,7 +976,7 @@ function setScheme(v) { scheme = v; store.set('controls', v); lockOn = null; $('
 $('scheme').addEventListener('change', e => setScheme(e.target.value));
 setScheme(scheme);
 function setPaused(v) {
-  paused = v; $('pause').style.display = v ? 'flex' : 'none';
+  paused = v; $('pause').style.display = v ? 'flex' : 'none'; if (v) renderJournal();
   if (v) { for (const k in keys) keys[k] = false; rmb = false; if (document.pointerLockElement) document.exitPointerLock(); $('btnResume').focus(); }
   else lockPointer();
 }
@@ -1010,16 +1010,50 @@ setText($('startTitle'), [['THE ARENA', F20]]); setText($('pauseTitle'), [['PAUS
 
 // ---------------------------------------------------------------- dialogue
 let convo = null;
+// ---- story state: Gothic-style conditional topics (dialogue/arena.json -> dialogue.json). A topic shows while its
+// conditions hold (cond.has / cond.not flags) and, unless once:false, until it has been heard. Afterwards it can set
+// flags, add a journal entry, give ore and trigger an effect.
+const story = { flags: new Set(), heard: new Set(), journal: [], ore: 0, title: (dlg.quest && dlg.quest.title) || 'Journal' };
+const castName = Object.fromEntries(dlg.cast.map(c => [c.id, c.name]));
+const fmt = t => t.replace(/\{([A-Z_]+)\}/g, (m, id) => castName[id] || m); // {KHARIM} -> that NPC's name
+function topicOpen(n, t) {
+  const c = t.cond || {};
+  return (t.once === false || !story.heard.has(n.cast.id + ':' + t.id))
+    && (c.has || []).every(f => story.flags.has(f)) && !(c.not || []).some(f => story.flags.has(f));
+}
+function addJournal(text) {
+  text = fmt(text); if (story.journal.includes(text)) return;
+  story.journal.push(text); showMsg('New journal entry: ' + story.title, 3000); renderJournal();
+}
+function renderJournal() {
+  const j = $('journal'); if (!j) return;
+  j.innerHTML = '';
+  const h = document.createElement('div'); h.className = 'jtitle'; h.textContent = story.title + (story.journal.length ? '' : ' (nothing yet)'); j.appendChild(h);
+  for (const e of story.journal) { const d = document.createElement('div'); d.className = 'jentry'; d.textContent = e; j.appendChild(d); }
+  const o = document.createElement('div'); o.className = 'jore'; o.textContent = 'Ore: ' + story.ore; j.appendChild(o);
+}
+// what a heard topic changes; effects that start a fight run once the conversation has closed
+function topicDone(n, t) {
+  story.heard.add(n.cast.id + ':' + t.id);
+  for (const f of t.set || []) story.flags.add(f);
+  if (t.ore) { story.ore += t.ore; showMsg('+' + t.ore + ' ore', 2500); renderJournal(); }
+  if (t.journal) addJournal(t.journal);
+  const [kind, id, val] = (t.effect || '').split(':'), byId = id && npcs.find(x => x.cast && x.cast.id === id);
+  if (kind === 'weaken' && byId) byId.str = Math.max(0, byId.str - (+val || 0));
+  if (kind === 'fight') return () => { n.hostile = player; bark(n, 'YOUASKEDFORIT'); };
+  if (kind === 'hostile' && byId) return () => setTimeout(() => { if (!byId.downed) { byId.hostile = player; bark(byId, 'YOUASKEDFORIT'); } }, 2500);
+  return null;
+}
 function nearestTalker() {
   let b = null, bd = 3.2;
   for (const n of npcs) { if (n.downed || n.hostile || n.act) continue; const d = dist2(n, player); if (d < bd) { bd = d; b = n; } }
   return b;
 }
-function topicLabel(t) { const pl = t.lines.find(l => l.who === 'player') || t.lines[0]; const s = pl.text.replace(/\s+/g, ' '); return s.length > 120 ? s.slice(0, 118) + '…' : s; }
+function topicLabel(t) { const pl = t.label ? { text: t.label } : t.lines.find(l => l.who === 'player') || t.lines[0]; const s = fmt(pl.text).replace(/\s+/g, ' '); return s.length > 120 ? s.slice(0, 118) + '…' : s; }
 function openMenu(n) {
   convo = { npc: n, state: 'menu' }; lockedUI = true; document.exitPointerLock(); n.talking = false;
   const m = $('menu'); m.style.display = 'block'; m.innerHTML = ''; $('hp').style.visibility = 'hidden';
-  const opts = n.cast.topics.map(t => ({ label: topicLabel(t), run: () => playTopic(n, t) }));
+  const opts = n.cast.topics.filter(t => topicOpen(n, t)).map(t => ({ label: topicLabel(t), run: () => playTopic(n, t) }));
   if (n.duty !== 'idle') opts.push({ label: '⚔ I challenge you to a fight!', run: () => { closeConvo(); n.hostile = player; bark(n, 'YOUASKEDFORIT'); } });
   opts.push({ label: 'Goodbye', run: closeConvo });
   n.cast.topics.forEach(t => t.lines.forEach(l => loadSound(l.wav)));
@@ -1037,9 +1071,14 @@ function playTopic(n, t) {
   $('menu').style.display = 'none'; $('hp').style.visibility = ''; convo.state = 'talk'; let i = 0;
   const next = () => {
     if (!convo || convo.npc !== n) return;
-    if (i >= t.lines.length) { setText($('sub'), ''); n.talking = false; return openMenu(n); }
+    if (i >= t.lines.length) {
+      setText($('sub'), ''); n.talking = false;
+      const after = topicDone(n, t);
+      if (after) { closeConvo(); after(); return; }
+      return openMenu(n);
+    }
     const l = t.lines[i++], line = ++convo.line; n.talking = l.who === 'npc';
-    setText($('sub'), [[(l.who === 'npc' ? n.name : 'You') + ': ', F10HI], [l.text, F10]], innerWidth * 0.6 / uiScale());
+    setText($('sub'), [[(l.who === 'npc' ? n.name : 'You') + ': ', F10HI], [fmt(l.text), F10]], innerWidth * 0.6 / uiScale());
     // each line advances once: when its voice ends, or when it is skipped (right click), whichever comes first
     playVoice(l.wav, () => setTimeout(() => { if (convo && convo.line === line) next(); }, 350));
   };
@@ -1485,7 +1524,7 @@ function frame() {
   requestAnimationFrame(frame);
 }
 window.__game = {
-  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, barrierState: { flashes, bolts, barrier }, doors, useDoor, setWeather, wx, barrierFlash, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
+  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, story, openMenu, get convo() { return convo; }, barrierState: { flashes, bolts, barrier }, doors, useDoor, setWeather, wx, barrierFlash, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
   get yaw() { return player.heading; }, set yaw(v) { player.heading = v; }, set pitch(v) { pitch = v; },
   set sneak(v) { sneakOn = v; },
 };

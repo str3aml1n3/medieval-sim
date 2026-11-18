@@ -1,0 +1,193 @@
+{
+  "_doc": "Authored dialogue for the arena cast (original writing). Topics appear when their conditions hold, like Gothic's info conditions: cond.has = flags that must be set, cond.not = flags that must not be. once (default true) hides a topic after it was heard. After a topic: set = flags to set, journal = a journal entry, ore = ore the hero gains, effect = 'fight' (this NPC attacks), 'hostile:ID' (another NPC attacks once the talk ends), 'weaken:ID:N' (lower an NPC's strength). Lines are [speaker, text], speaker 'npc' or 'hero'. {ID} in a text becomes that NPC's name. Voices are synthesised per line (tools/voice), named VO_<ID>_<TOPIC>_<NN>.",
+  "quest": { "id": "FIXED_FIGHT", "title": "The Fixed Fight" },
+  "cast": {
+    "KIRGO": {
+      "role": "arena regular",
+      "topics": [
+        { "id": "WHO", "lines": [
+          ["hero", "Who are you?"],
+          ["npc", "{KIRGO}. I fight in the pit, when the Barons let me."],
+          ["npc", "Mostly they don't. Today it's {KHARIM} from the New Camp against {GORHANIS} from the swamp. Same as every week."] ] },
+        { "id": "RIVALS", "set": ["ARENA_KNOWN"], "lines": [
+          ["hero", "What's the story with those two?"],
+          ["npc", "{KHARIM} fights for ore. {GORHANIS} fights for his Sleeper. Neither has beaten the other in a month."],
+          ["npc", "The whole camp bets on it. {BLOODWYN} keeps the book."] ] },
+        { "id": "RUMOR", "cond": { "has": ["ARENA_KNOWN"], "not": ["KNOWS_PLOT"] }, "set": ["RUMOR"],
+          "journal": "{KIRGO} thinks today's fight is fixed. {BLOODWYN} has bet more ore than he owns on {KHARIM}. {WHISTLER} by the benches may know more.",
+          "lines": [
+          ["hero", "Is something wrong with today's fight?"],
+          ["npc", "Keep your voice down. {BLOODWYN} put more ore on {KHARIM} than he's got."],
+          ["npc", "A man that deep in debt doesn't leave a fight to chance. If anyone knows more, it's {WHISTLER}."],
+          ["hero", "Where do I find him?"],
+          ["npc", "Near the benches. He hears everything, and sells what he hears."] ] },
+        { "id": "CLEAN", "cond": { "has": ["RESOLVED_HONEST"] }, "lines": [
+          ["hero", "Looks like the fight stays clean."],
+          ["npc", "Thanks to you. Maybe one day they'll let me fight for real."] ] },
+        { "id": "DIRTY", "cond": { "has": ["HELPED_BLOODWYN"] }, "lines": [
+          ["hero", "How's the templar doing?"],
+          ["npc", "{GORHANIS} stumbles around like a drunk. Funny thing, that."],
+          ["npc", "Whatever you had to do with it, I didn't see a thing."] ] }
+      ]
+    },
+    "WHISTLER": {
+      "role": "Shadow",
+      "topics": [
+        { "id": "WHO", "lines": [
+          ["hero", "Who are you?"],
+          ["npc", "Someone who listens. Most people in this camp only talk."] ] },
+        { "id": "CAMP", "lines": [
+          ["hero", "How does the Old Camp work?"],
+          ["npc", "The Barons sit in the castle and count ore. The guards collect it. The diggers sweat for it."],
+          ["npc", "The rest of us live in the gaps between. And over all of us hangs the Barrier. Nobody gets out, so everyone wants something else instead."] ] },
+        { "id": "PLOT", "cond": { "has": ["RUMOR"], "not": ["KNOWS_PLOT"] }, "set": ["KNOWS_PLOT"],
+          "journal": "{WHISTLER}: {BLOODWYN} paid {SNAF} to put swampshade in {GORHANIS}'s stew. I could warn {GORHANIS}, take proof to {THORUS}, or keep quiet and side with {BLOODWYN}.",
+          "lines": [
+          ["hero", "{KIRGO} says today's fight is fixed."],
+          ["npc", "{KIRGO} says a lot. This time he's right."],
+          ["npc", "{BLOODWYN} paid {SNAF} to cook something special for {GORHANIS}. Swampshade. One bowl, and the templar fights half asleep."],
+          ["hero", "Why are you telling me?"],
+          ["npc", "Because {BLOODWYN} owes me ore too. And because whoever you tell decides who wins."] ] },
+        { "id": "AFTER_CLEAN", "cond": { "has": ["RESOLVED_HONEST"] }, "lines": [
+          ["hero", "{BLOODWYN}'s plan is finished."],
+          ["npc", "So I heard. You've made an enemy, and a few friends. In this camp that's a fair trade."] ] },
+        { "id": "AFTER_DIRTY", "cond": { "has": ["HELPED_BLOODWYN"] }, "lines": [
+          ["hero", "The templar ate the stew."],
+          ["npc", "Then you picked a side. Remember, I know which one."] ] }
+      ]
+    },
+    "SNAF": {
+      "role": "cook",
+      "topics": [
+        { "id": "WHO", "lines": [
+          ["hero", "Something smells good."],
+          ["npc", "Rice and meatbug stew. Best food under the Barrier, as long as you don't ask what's in it."] ] },
+        { "id": "CONFRONT", "cond": { "has": ["KNOWS_PLOT"], "not": ["SNAF_DONE"] }, "set": ["SNAF_DONE", "SNAF_CONFESSED", "STEW_DUMPED"],
+          "journal": "{SNAF} poured the spiked stew away and admitted that {BLOODWYN} paid him. That is proof enough for {THORUS}.",
+          "lines": [
+          ["hero", "I know about the bowl you're cooking for {GORHANIS}."],
+          ["npc", "Quiet! {BLOODWYN} paid me twenty ore. Nobody says no to {BLOODWYN}."],
+          ["hero", "Pour it out. I'll make sure he leaves you alone."],
+          ["npc", "You'd better. Fine, it's gone. But if anyone asks, you never heard it from me."] ] },
+        { "id": "FETCH", "cond": { "has": ["BRIBED"], "not": ["SNAF_DONE"] }, "set": ["SNAF_DONE", "HAS_STEW"],
+          "journal": "I have the spiked bowl from {SNAF}. Now {GORHANIS} has to eat it.",
+          "lines": [
+          ["hero", "{BLOODWYN} sent me for the special bowl."],
+          ["npc", "Thought he might. Here. Don't spill it, and whatever you do, don't eat it."] ] }
+      ]
+    },
+    "BLOODWYN": {
+      "role": "guard, keeps the betting book",
+      "topics": [
+        { "id": "WHO", "lines": [
+          ["hero", "What do you do here?"],
+          ["npc", "I keep the book. You want to bet, you come to me. You want trouble, you also come to me."] ] },
+        { "id": "TIP", "cond": { "has": ["ARENA_KNOWN"], "not": ["KNOWS_PLOT"] }, "lines": [
+          ["hero", "Who should I bet on?"],
+          ["npc", "{KHARIM}. Trust me on that one."] ] },
+        { "id": "OFFER", "cond": { "has": ["KNOWS_PLOT"], "not": ["SNAF_DONE", "REPORTED", "WARNED"] }, "set": ["OFFERED"], "lines": [
+          ["hero", "I know what you're planning with the stew."],
+          ["npc", "Do you now. Then you also know there's ore in it."],
+          ["npc", "Fifty nuggets. Fetch the bowl from {SNAF} and see that {GORHANIS} eats it. Nobody gets hurt. Much."] ] },
+        { "id": "ACCEPT", "cond": { "has": ["OFFERED"], "not": ["BRIBED", "REFUSED", "SNAF_DONE", "WARNED", "REPORTED"] }, "set": ["BRIBED"], "ore": 25,
+          "journal": "{BLOODWYN} paid me 25 ore to bring {SNAF}'s bowl to {GORHANIS}. Another 25 once the templar has eaten it.",
+          "lines": [
+          ["hero", "Fifty ore. Deal."],
+          ["npc", "Smart kid. Half now, half when the templar's eaten."] ] },
+        { "id": "REFUSE", "cond": { "has": ["OFFERED"], "not": ["BRIBED", "REFUSED"] }, "set": ["REFUSED"], "lines": [
+          ["hero", "Find someone else for your dirty work."],
+          ["npc", "Careful. In this camp, accidents happen to people who talk."] ] },
+        { "id": "PAYDAY", "cond": { "has": ["HELPED_BLOODWYN"] }, "set": ["PAID"], "ore": 25,
+          "journal": "{BLOODWYN} paid the rest. The fight is fixed, and I helped fix it.",
+          "lines": [
+          ["hero", "{GORHANIS} ate the stew. Where's the rest of my ore?"],
+          ["npc", "Nice work. Here. And this conversation never happened."] ] },
+        { "id": "GRUDGE", "cond": { "has": ["REPORTED"] }, "lines": [
+          ["hero", "Still sore?"],
+          ["npc", "You cost me everything, rat. Stay out of my sight."] ] }
+      ]
+    },
+    "GORHANIS": {
+      "role": "templar of the Brotherhood",
+      "topics": [
+        { "id": "WHO", "lines": [
+          ["hero", "Who are you?"],
+          ["npc", "{GORHANIS}, templar of the Brotherhood. I fight so this camp sees the strength the Sleeper gives."] ] },
+        { "id": "SLEEPER", "lines": [
+          ["hero", "Who is the Sleeper?"],
+          ["npc", "The one who will free us from the Barrier. Our Gurus see him in their dreams."],
+          ["npc", "You may laugh now. One day the whole valley will hear him wake."] ] },
+        { "id": "WARN", "cond": { "has": ["KNOWS_PLOT"], "not": ["WARNED", "HELPED_BLOODWYN"] }, "set": ["WARNED", "RESOLVED_HONEST"],
+          "journal": "I warned {GORHANIS}. He will fast before the fight, so {BLOODWYN}'s stew won't touch him.",
+          "lines": [
+          ["hero", "Don't eat anything from the kitchen before you fight."],
+          ["npc", "Poison? So the Old Camp fears an honest fight."],
+          ["npc", "I will fast. The Sleeper rewards discipline. I owe you, stranger."] ] },
+        { "id": "STEW", "cond": { "has": ["HAS_STEW"], "not": ["WARNED", "HELPED_BLOODWYN"] }, "set": ["HELPED_BLOODWYN"], "effect": "weaken:GORHANIS:35",
+          "journal": "I gave {GORHANIS} the spiked stew. He'll fight half asleep, {KHARIM} will win, and {BLOODWYN} owes me 25 ore.",
+          "lines": [
+          ["hero", "Here, a bowl from the kitchen."],
+          ["npc", "Food before a fight is a weakness. But the Sleeper does not forbid it. Thank you."] ] },
+        { "id": "THANKS", "cond": { "has": ["WARNED"] }, "lines": [
+          ["hero", "Ready for the fight?"],
+          ["npc", "My head is clear, thanks to you. {KHARIM} will have to beat me honestly."] ] }
+      ]
+    },
+    "KHARIM": {
+      "role": "fighter from the New Camp",
+      "topics": [
+        { "id": "WHO", "lines": [
+          ["hero", "Who are you?"],
+          ["npc", "{KHARIM}, from the New Camp. I come here to beat swamp-smokers and take the Old Camp's ore home."] ] },
+        { "id": "NEWCAMP", "lines": [
+          ["hero", "What's the New Camp like?"],
+          ["npc", "No Barons, no tribute. We dig our own ore, and our Water Mages mean to blow the Barrier apart with it."],
+          ["npc", "The Old Camp sells its ore to the King for wine and women. We keep ours."] ] },
+        { "id": "TELL", "cond": { "has": ["KNOWS_PLOT"], "not": ["TOLD_KHARIM", "HELPED_BLOODWYN"] }, "set": ["TOLD_KHARIM"], "lines": [
+          ["hero", "{BLOODWYN} is fixing your fight. He's drugging {GORHANIS}."],
+          ["npc", "What? I don't need an Old Camp rat's help to win!"],
+          ["npc", "If the templar goes down, it'll be my mace that does it. Tell {THORUS}. He hates cheats in his arena."] ] }
+      ]
+    },
+    "THORUS": {
+      "role": "captain of the guard",
+      "topics": [
+        { "id": "WHO", "lines": [
+          ["hero", "Who are you?"],
+          ["npc", "{THORUS}. Captain of the Barons' guard. This arena is mine."] ] },
+        { "id": "RULES", "lines": [
+          ["hero", "What are the rules of the arena?"],
+          ["npc", "Two fighters, weapons out. You fight until one goes down. Nobody dies."],
+          ["npc", "And nobody cheats. Not in my arena."] ] },
+        { "id": "NOPROOF", "cond": { "has": ["KNOWS_PLOT"], "not": ["SNAF_CONFESSED", "REPORTED", "HELPED_BLOODWYN"] }, "once": false,
+          "journal": "{THORUS} wants proof before he'll move against one of his own guards. {SNAF} would know.",
+          "lines": [
+          ["hero", "{BLOODWYN} is fixing today's fight."],
+          ["npc", "That's a serious charge against one of my men. Bring me proof, or keep your mouth shut."] ] },
+        { "id": "REPORT", "cond": { "has": ["SNAF_CONFESSED"], "not": ["REPORTED", "HELPED_BLOODWYN"] }, "set": ["REPORTED", "RESOLVED_HONEST"], "ore": 100,
+          "effect": "hostile:BLOODWYN",
+          "journal": "I told {THORUS} everything. He paid me 100 ore and will deal with {BLOODWYN}. {BLOODWYN} won't take that quietly.",
+          "lines": [
+          ["hero", "{SNAF} confessed. {BLOODWYN} paid him to drug {GORHANIS}."],
+          ["npc", "Then I'll deal with {BLOODWYN}."],
+          ["npc", "You've done this camp a service. A hundred ore. And if you ever want to wear the guard's armour for real, come and see me."] ] }
+      ]
+    },
+    "FLETCHER": {
+      "role": "guard",
+      "topics": [
+        { "id": "WHO", "lines": [
+          ["hero", "Who are you?"],
+          ["npc", "{FLETCHER}. Guard. I keep this end of the camp quiet."] ] },
+        { "id": "DEBT", "cond": { "has": ["RUMOR"] }, "lines": [
+          ["hero", "What do you know about {BLOODWYN}?"],
+          ["npc", "That he owes more ore than any man in this camp. Lost it at dice, to the Barons' own men."],
+          ["npc", "A guard that deep in debt gets ideas. Watch him."] ] },
+        { "id": "BARRIER", "lines": [
+          ["hero", "How did you end up here?"],
+          ["npc", "Same as everyone. The King needs ore for his war with the orcs, so he throws convicts in here to dig it."],
+          ["npc", "The Barrier was meant to keep us in. It keeps everyone else out too. Even the mages who made it."] ] }
+      ]
+    }
+  }
+}

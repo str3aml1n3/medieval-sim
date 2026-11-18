@@ -32,6 +32,21 @@ python -m http.server 8000 --bind 127.0.0.1       # from the repo root
 # open http://127.0.0.1:8000/web/   (on Windows: double-click start.bat)
 ```
 
+**Story voices (optional, local only):** the arena story's lines are voiced by a speech model conditioned on each
+character's own original recordings from your install. The output stays in `export/` and is never committed.
+XTTS-v2's licence is non-commercial; on a CPU it takes roughly 20 s per line (about 35 minutes for the story).
+
+```bash
+python -m venv tools/voice/.venv
+tools/voice/.venv/Scripts/pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+tools/voice/.venv/Scripts/pip install coqui-tts torchcodec six msvc-runtime
+./run.sh export_voice_refs.py                                   # reference clips -> export/voice_refs/
+tools/voice/.venv/Scripts/python tools/voice/synth_voices.py    # voices -> export/audio/VO_*.wav (only changed lines)
+```
+
+On Windows without the Visual C++ runtime, copy the DLLs `msvc-runtime` puts in `tools/voice/.venv/` into
+`tools/voice/.venv/Lib/site-packages/torch/lib/`.
+
 For Gothic's own music, build the renderer first (needs CMake + a C compiler). See
 [docs/PIPELINE.md](docs/PIPELINE.md#export_musicpy--toolsrender--musicwav). Without it, the game plays a
 generated score.
@@ -80,6 +95,9 @@ Damage is Gothic 1's: strength + weapon damage − the target's protection again
 | `export_lines.py` | subtitle text index from `OUINFO.INF` → `all_lines.json` |
 | `export_audio.py` | speech, barks, SFX incl. combat sounds (ADPCM → PCM) + dialogue topics → `audio/`, `dialogue.json` |
 | `export_music.py` | DirectMusic themes → looping WAVs via `tools/render` → `music/` |
+| `dialogue/arena.json`, `dialogue/tree.py` | the authored arena story "The Fixed Fight" (conditions, flags, journal, effects) and its loader |
+| `export_voice_refs.py` | reference clips of each character's own lines → `voice_refs/` (for the voice model) |
+| `tools/voice/synth_voices.py` | synthesises the story's voice lines with XTTS-v2 → `audio/VO_*.wav` (local only) |
 | `export_all.sh` | runs all of the above in order |
 | `run.sh` | runs one script with the right `PYTHONPATH`, filtering ZenKit exit noise |
 | `start.ps1`, `start.bat` | serve the repo locally and open the game |
