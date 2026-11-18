@@ -190,3 +190,25 @@ outweighs down-facing area about 5:1.
 | Doors, chests, benches, torches missing | only `.3DS` vobs exported | load `.MDL` (or `.MDH`+`.MDM`) for `.ASC`/`.MDS` visuals |
 | Characters walk through props | `cd_static` used for collision; it is off for most props | `cd_dynamic` is the "NPCs collide" flag |
 | Animated bones twisted | quaternion field order / inverse rotation | see *Quaternion convention* above |
+
+## Stand-in assets (`standin/`, `tools/standin/make_standin.py`)
+
+So the game runs from a plain clone (development, tests, the Pages build), `tools/standin/make_standin.py` writes
+original placeholder content in exactly the formats above. It needs numpy and Pillow only, uses a fixed seed (same
+output every run), and its output is committed. `web/game.js` loads `export/` when `export/world.json` exists and
+`standin/` otherwise; `?assets=standin` or `?assets=export` forces one.
+
+What it generates, and the contract it keeps with the game:
+
+| File | Contents |
+|---|---|
+| `world.json` / `world.bin` | polar terrain with a sunken arena (stone wall, ramp), three plank huts with dark interiors and walkable roofs, crates at the three climbing heights (0.9 / 1.5 / 2.4 m), benches, torches; per-vertex light bytes; 3 doors (one locked) with 24 hinge matrices per clip |
+| `waypoints.json` | the waypoint names the game places NPCs at (`OCR_ARENA_01..09`, `OCR_OUTSIDE_ARENA*`, `OCR_ARENA_BARONS_HUT`) |
+| `chars.json` | a 23-bone biped using the bone names the game looks up (`BIP01 L/R FOOT`, `ZS_RIGHTHAND`, `ZS_SWORD`, `ZS_LONGSWORD`, ...), rest rotations identity for body bones; box outfits/heads rigidly skinned; sword, mace, greatsword; `looks` for the game's NPC ids with stats equal to the extracted ones |
+| `anims.json` | every clip name the game plays (59), posed procedurally: gaits with root-motion speeds, jumps, the three climb sequences with root rises of 0.97 / 1.48 / 2.63 m ending 0.75 m forward, attacks with `optimal_frame` / `hit_end` / `combo_window` events, the weapon draw as an upper-body overlay with `set_fight_mode`, knock-downs, spectator and dialogue overlays |
+| `dialogue.json` | the cast with invented names and placeholder topics; voice files are deliberately absent (the game shows each subtitle for 1.5 s) |
+| `ui/` | font atlases + glyph tables rendered from Pillow's bundled font, HUD bars, dialogue box, sky layers, sun, barrier veins, lightning frames, rain clouds |
+| `tex/`, `audio/` | procedural textures; synthesised footsteps, clashes, hits, draws, doors, rain, barrier crackle, hero grunts |
+
+When the game starts asking for a new file, clip, bone or waypoint, add it to the generator too, or a plain clone
+breaks.

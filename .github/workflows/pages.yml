@@ -3,7 +3,7 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
-    paths: ['web/**', '.github/workflows/pages.yml']
+    paths: ['web/**', 'standin/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -23,11 +23,17 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      # Only the engine (web/) is published. Extracted Gothic assets (export/) are
-      # copyrighted, git-ignored, and never deployed. See README for local setup.
+      # Published: the engine (web/) and the original stand-in assets (standin/), side by side as the game expects,
+      # so the hosted page is playable. Extracted Gothic assets (export/) are copyrighted, git-ignored and never
+      # deployed. See README for local setup.
+      - name: Stage site
+        run: |
+          mkdir -p _site
+          cp -r web standin _site/
+          echo '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=web/"><a href="web/">medieval-sim</a>' > _site/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4

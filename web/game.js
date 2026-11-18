@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 
-const E = '../export/';
+// Assets: export/ when it exists (extracted from your own Gothic install, see the README), otherwise the committed
+// stand-ins in standin/ (original placeholders, tools/standin/make_standin.py) so a plain clone runs for development
+// and tests. ?assets=standin or ?assets=export picks one explicitly.
+const ASSETS = new URLSearchParams(location.search).get('assets');
+const E = ASSETS === 'standin' ? '../standin/' : ASSETS === 'export' ? '../export/'
+  : await fetch('../export/world.json', { method: 'HEAD' }).then(r => (r.ok ? '../export/' : '../standin/')).catch(() => '../standin/');
+const STANDIN = E === '../standin/';
 const $ = id => document.getElementById(id);
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = a => a[Math.floor(Math.random() * a.length)];
@@ -72,9 +78,10 @@ function getTex(name) {
 let world, wbin, chars, anims, dlg, wps;
 try { [world, wbin, chars, anims, dlg, wps] = await Promise.all([jget('world.json'), bget('world.bin'), jget('chars.json'), jget('anims.json'), jget('dialogue.json'), jget('waypoints.json')]); }
 catch (err) {
-  $('loadmsg').innerHTML = 'Game assets not found or out of date (' + err.message + ').<br><small>Assets are extracted locally from your own Gothic install and are not hosted here.<br>Run <code>./export_all.sh</code> (see the README), then serve the repo root and open /web/.</small>';
+  $('loadmsg').innerHTML = 'Game assets not found or out of date (' + E + err.message + ').<br><small>Gothic assets are extracted locally from your own install and are not hosted here:<br>run <code>./export_all.sh</code> (see the README). Without them the game uses the committed stand-ins in <code>standin/</code>;<br>regenerate those with <code>python tools/standin/make_standin.py</code>. Serve the repo root and open /web/.</small>';
   throw err;
 }
+if (STANDIN) { $('help').insertAdjacentHTML('afterbegin', '<span style="color:#e0b860">stand-in assets</span> · '); console.info('Using stand-in assets (standin/): export/ not found'); }
 const WP = Object.fromEntries(wps.map(w => [w.n, new THREE.Vector3(w.x, w.y, w.z)]));
 
 // ---------------------------------------------------------------- Gothic UI: bitmap fonts (export_ui.py)

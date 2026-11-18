@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
 if (-not (Test-Path 'export\world.json')) {
-    Write-Warning "export\ has no assets yet. Run ./export_all.sh first (see README), or the game will show 'assets not found'."
+    Write-Host "export\ has no Gothic assets: running with the committed stand-ins (standin\). Run ./export_all.sh to use your Gothic install (see README)."
 }
 
 $py = if ($env:PYTHON) { $env:PYTHON } elseif (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'py' }
