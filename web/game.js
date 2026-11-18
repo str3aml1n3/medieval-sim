@@ -7,6 +7,9 @@ const ASSETS = new URLSearchParams(location.search).get('assets');
 const E = ASSETS === 'standin' ? '../standin/' : ASSETS === 'export' ? '../export/'
   : await fetch('../export/world.json', { method: 'HEAD' }).then(r => (r.ok ? '../export/' : '../standin/')).catch(() => '../standin/');
 const STANDIN = E === '../standin/';
+// the HUD's CSS images come from the same asset folder
+for (const [v, f] of [['--bar-back', 'BAR_BACK'], ['--bar-health', 'BAR_HEALTH'], ['--dlg-choice', 'DLG_CHOICE']])
+  document.documentElement.style.setProperty(v, `url(${E}ui/${f}.png)`);
 const $ = id => document.getElementById(id);
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = a => a[Math.floor(Math.random() * a.length)];

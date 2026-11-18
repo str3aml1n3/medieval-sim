@@ -6,9 +6,9 @@ html,body{margin:0;height:100%;background:#111;color:#e8dcc0;font-family:Georgia
 canvas{display:block}
 #hud{position:fixed;inset:0;pointer-events:none}
 /* Gothic's status bar: BAR_BACK frame with the BAR_HEALTH fill inset into it (both 256x32) */
-.gbar{position:relative;width:calc(192px * var(--ui,1));height:calc(24px * var(--ui,1));background:url(../export/ui/BAR_BACK.png) 0 0/100% 100% no-repeat}
+.gbar{position:relative;width:calc(192px * var(--ui,1));height:calc(24px * var(--ui,1));background:var(--bar-back) 0 0/100% 100% no-repeat}
 .gbar .in{position:absolute;left:4.7%;right:4.7%;top:17%;bottom:17%;overflow:hidden}
-.gbar .fill{height:100%;width:100%;background:url(../export/ui/BAR_HEALTH.png) 0 0/100% 100% no-repeat}
+.gbar .fill{height:100%;width:100%;background:var(--bar-health) 0 0/100% 100% no-repeat}
 #hp{position:absolute;left:16px;bottom:16px}
 canvas.gt{display:inline-block;vertical-align:top}
 #help{position:absolute;right:16px;top:12px;font-size:12px;line-height:1.5;text-align:right;opacity:.8;text-shadow:0 0 4px #000}
@@ -16,7 +16,7 @@ canvas.gt{display:inline-block;vertical-align:top}
 #sub b{color:#e0b860}
 #prompt{position:absolute;left:50%;top:62%;transform:translateX(-50%);font-size:18px;text-shadow:0 0 6px #000}
 /* Gothic's dialogue choice box: the DLG_CHOICE texture stretched across the whole bottom of the screen, no frame */
-#menu{position:absolute;left:0;right:0;bottom:0;background:url(../export/ui/DLG_CHOICE.png) 0 0/100% 100% no-repeat;background-color:rgba(0,0,0,.35);padding:calc(10px * var(--ui,1)) 6vw calc(14px * var(--ui,1));display:none;pointer-events:auto;box-sizing:border-box}
+#menu{position:absolute;left:0;right:0;bottom:0;background:var(--dlg-choice) 0 0/100% 100% no-repeat;background-color:rgba(0,0,0,.35);padding:calc(10px * var(--ui,1)) 6vw calc(14px * var(--ui,1));display:none;pointer-events:auto;box-sizing:border-box}
 #menu div{padding:calc(2px * var(--ui,1)) 0;cursor:pointer}
 #msg{position:absolute;top:14px;left:50%;transform:translateX(-50%);font-size:22px;color:#e0b860;text-shadow:0 0 6px #000}
 #start{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;z-index:5;text-align:center}
