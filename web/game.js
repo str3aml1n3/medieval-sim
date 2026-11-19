@@ -1276,15 +1276,14 @@ function onKey(e) {
     else { p.lastMode = m; if (p.drawn && p.mode === m) toggleWeapon(p); else switchWeapon(p, m); }
   }
   if (modern && e.code === 'Space') {
-    // Space + S jumps back with the weapon drawn (otherwise you just walk back); Space + A/D strafe (see
+    // Space + S parries with the weapon drawn (otherwise you just walk back) and Space + A/D strafe (both in
     // playerInput); Space alone jumps (or climbs), except while focusing. The direction may come a moment after
     // Space, so the decision waits a short window.
     clearTimeout(spaceT);
     spaceT = setTimeout(() => {
       if (convo || paused || p.downed) return;
       const sideKey = keys.KeyA || keys.KeyD || keys.ArrowLeft || keys.ArrowRight;
-      if (keys.KeyS || keys.ArrowDown) { if (p.drawn && !p.drawing) jumpBack(p); }
-      else if (!sideKey && !actionHeld()) jump(p); // with A/D, or while focusing, Space is the strafe modifier
+      if (!sideKey && !(keys.KeyS || keys.ArrowDown) && !actionHeld()) jump(p); // with A/D, or while focusing, Space is the strafe modifier
     }, SPACE_WINDOW);
   } else if (!modern && (e.code === 'AltLeft' || e.code === 'AltRight' || e.code === 'KeyV')) jump(p);
   if (e.code === 'Tab') { walkOn = !walkOn; flash(walkOn ? 'Walking' : 'Running'); }
@@ -1307,10 +1306,9 @@ function playerInput(dt) {
   if (!modern || strafeMod) p.mv.s = side;
   else if (side && !(p.drawn && actionHeld())) { p.heading -= side * TURN_RATE * dt; p.mv.turn = side; }
   if (p.drawn && actionHeld()) { p.mv.f = 0; if (!k.Space) p.mv.s = 0; } // holding the action key: the direction keys fight, not walk (Space + A/D still strafe)
-  const parry = p.drawn && rmb && (!modern || back);
+  const parry = p.drawn && (modern ? (rmb || k.Space) && back : rmb); // modern: right mouse or Space + S parry
   if (parry) { p.mv.f = 0; if (!p.drawing && !p.act) parade(p); }
-  else if (!modern && p.drawn && !p.drawing && p.mv.f < 0) { p.mv.f = 0; if (!p.act) jumpBack(p); } // modern: Space + S jumps back
-  else if (modern && back && k.Space && p.drawn) p.mv.f = 0; // armed: Space + S jumps back (on the key press); unarmed: walk back
+  else if (!modern && p.drawn && !p.drawing && p.mv.f < 0) { p.mv.f = 0; if (!p.act) jumpBack(p); } // (Gothic scheme: S jumps back)
   // locked focus (modern scheme): keep facing the target; A/D then circle around it
   if (lockOn && (lockOn.downed || dist2(p, lockOn) > (p.drawn && p.mode === 'ranged' ? MAX_RANGE : LOCK_RANGE))) lockOn = null;
   if (actionHeld() && !lockOn) acquireLock(); // still holding: take the next target that comes into view
