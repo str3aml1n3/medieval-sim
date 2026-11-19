@@ -1464,7 +1464,6 @@ function updateHud() {
   if (foe) { setText($('ehpn'), foe.name); $('ehpf').style.width = Math.max(0, (100 * foe.hp) / foe.maxHp) + '%'; }
   $('hpf').style.width = Math.max(0, (100 * p.hp) / p.maxHp) + '%';
   setText($('gait'), sneakOn ? 'sneaking' : keys.ShiftLeft || keys.ShiftRight ? 'walking' : '');
-  const t = nearestTalker(); setText($('prompt'), !convo && t && !p.downed && !p.drawn ? 'E — talk to ' + t.name : '');
 }
 
 // ---------------------------------------------------------------- main loop
