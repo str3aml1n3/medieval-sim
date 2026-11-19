@@ -59,8 +59,10 @@ The mouse turns the hero in both.
 
 | Action | Modern | Gothic |
 |---|---|---|
-| move / strafe | W S / A D | W S / A D |
-| walk | Shift (hold) | Shift (hold) |
+| move | W / S | W / S |
+| turn on the spot | A / D | – (mouse) |
+| strafe | right mouse or Space (hold) + A / D | A / D |
+| walk / run | Tab switches for good, Shift while held | same |
 | jump; facing a ledge: climb up | Space | Alt or V |
 | sneak on/off | X | C |
 | draw / sheathe weapon | Ctrl | Space or F |
@@ -68,8 +70,8 @@ The mouse turns the hero in both.
 | focus lock on the target in front | hold the action key | – |
 | attack forward / left / right | action + W / A / D | left click / A or D + left click |
 | chain a combo | repeat as the swing ends (too early breaks it) | same |
-| parry | right click, or action + S | right click, or S + left click |
-| jump back (weapon drawn) | S | S |
+| parry | right mouse + S, or action + S | right click, or S + left click |
+| jump back (weapon drawn) | Space + S | S |
 | talk | action key (weapon sheathed) | E |
 | pick a dialogue option | mouse wheel + left click, ↑/↓ + Enter, or 1–7 | same |
 | skip the line being spoken | right click | right click |

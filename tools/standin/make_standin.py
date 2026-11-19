@@ -489,6 +489,11 @@ def build_anims():
         C[f'T_{name}RUNSTRAFEL'] = make_clip(n, fn, speed=3.0 if not armed else 2.8); C[f'T_{name}RUNSTRAFER'] = make_clip(n, fn, speed=3.0 if not armed else 2.8)
         n, fn = gait(1.0, 12, 10, 4, 0, 0.0, crouch=1.0, armed=armed, side=True); C[f'T_{name}SNEAKSTRAFEL'] = make_clip(n, fn, speed=0.9)
     n, fn = gait(1.0, 14, 14, 6, 0, 0.01, side=True); C['T_WALKSTRAFEL'] = make_clip(n, fn, speed=1.2); C['T_WALKSTRAFER'] = make_clip(n, fn, speed=1.2)
+    # turning on the spot: small steps with the hips twisting towards the turn (the game rotates the hero)
+    for name, armed in (('', False), ('1H', True)):
+        for side, sgn in (('L', 1), ('R', -1)):
+            n, base = gait(0.7, 10, 22, 4, 0, 0.0, armed=armed)
+            C[f'T_{name}RUNTURN{side}'] = make_clip(n, lambda f, base=base, sgn=sgn: merge(base(f), {'BIP01 SPINE': (0, 8 * sgn, 0)}))
 
     # jumping and falling (the game drives the arc; root height is fixed by the code)
     tuck = {'BIP01 L THIGH': (60, 0, 0), 'BIP01 R THIGH': (20, 0, 0), 'BIP01 L CALF': (-80, 0, 0), 'BIP01 R CALF': (-40, 0, 0),

@@ -613,10 +613,11 @@ function locomote(c, dt) {
   const { f, s } = c.mv, set = LOCO[c.drawn ? '1h' : 'free'];
   const k = f > 0 ? 'fwd' : f < 0 ? 'back' : s < 0 ? 'left' : s > 0 ? 'right' : 'idle';
   let name = set[k][c.gait], rev = k === 'back';
+  if (k === 'idle' && c.mv.turn && c.gait !== 'sneak') name = (c.drawn ? 'T_1HRUNTURN' : 'T_RUNTURN') + (c.mv.turn < 0 ? 'L' : 'R');
   if (name[0] === '-') { name = name.slice(1); rev = !rev; }
   const rate = (k === 'left' || k === 'right') && c.gait === 'walk' ? 0.6 : 1;
   c.play(name, { loop: true, rev, rate, blend: 0.2 });
-  if (k === 'idle') return null;
+  if (k === 'idle') return null; // (turning on the spot moves nothing either)
   const clip = c.base.clip, sp = clip.speed * rate;
   // footsteps twice per cycle
   const ph = frameAt(c.base) / clip.n, prev = c.stepPh; c.stepPh = ph;
@@ -887,6 +888,8 @@ function tickAction(c, dt) {
 
 // ---------------------------------------------------------------- input
 const keys = {}; let pitch = 0.22, lockedUI = false, sneakOn = false, rmb = false;
+let spaceT = 0; const SPACE_WINDOW = 120; // ms: Space + a direction pressed this close together is a combination
+let walkOn = false; // Tab switches between running and walking for good; Shift switches only while held
 // two control schemes: 'gothic' (the original's keys) and 'modern' (Space jumps, Ctrl draws, X sneaks, R looks back,
 // right mouse locks the focus on an enemy). Picked in the pause menu, remembered per browser.
 let scheme = store.get('controls', 'modern') === 'gothic' ? 'gothic' : 'modern'; // modern is the default ('controls' replaces an older key that always stored 'gothic')
@@ -894,7 +897,7 @@ let lockOn = null; // modern scheme: the NPC the hero stays turned towards
 let sens = store.get('sens', 1);
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 addEventListener('keydown', e => {
-  if (MOVE_KEYS.includes(e.code) || e.code === 'Space' || e.key === 'Alt' || (started && !paused && !lockedUI && (e.key === 'Control' || e.ctrlKey))) e.preventDefault();
+  if (MOVE_KEYS.includes(e.code) || e.code === 'Space' || e.code === 'Tab' || e.key === 'Alt' || (started && !paused && !lockedUI && (e.key === 'Control' || e.ctrlKey))) e.preventDefault();
   if (!e.repeat) onKey(e); keys[e.code] = true;
 });
 // Ctrl is the draw key in the modern scheme, and browsers don't let a page block Ctrl+W: ask before the tab closes
@@ -920,7 +923,7 @@ addEventListener('mousedown', e => {
   if (!document.pointerLockElement || lockedUI || paused) return;
   // Gothic scheme: left = attack. Modern: left = lock focus on a target (E is the action key there). Right = parry in both.
   if (e.button === 0) { if (scheme === 'modern') { lmb = true; actionPress(); } else actionInput(dirKeys()); }
-  if (e.button === 2) { rmb = true; if (player.drawn) parade(player); }
+  if (e.button === 2) { rmb = true; if (player.drawn && (scheme === 'gothic' || keys.KeyS || keys.ArrowDown)) parade(player); }
 });
 addEventListener('mouseup', e => { if (e.button === 2) rmb = false; if (e.button === 0) { lmb = false; actionRelease(); } });
 addEventListener('contextmenu', e => e.preventDefault());
@@ -1121,22 +1124,42 @@ function onKey(e) {
     else if (ACTION_DIRS[e.code] && actionHeld() && (p.drawn || p.drawing) && !p.downed) actionInput(ACTION_DIRS[e.code]); // action + direction
   } else if (e.code === 'KeyE' && !p.downed && !p.drawn) interact();
   if ((modern ? e.code === 'ControlLeft' || e.code === 'ControlRight' : e.code === 'Space' || e.code === 'KeyF') && !p.downed) toggleWeapon(p);
-  if (modern ? e.code === 'Space' : e.code === 'AltLeft' || e.code === 'AltRight' || e.code === 'KeyV') jump(p);
+  if (modern && e.code === 'Space') {
+    // Space with a direction: A/D strafe while it's held (see playerInput); S jumps back with the weapon drawn and
+    // otherwise just walks back. On its own: jump (or climb). The direction may come a moment after Space, so the
+    // decision waits a short window.
+    clearTimeout(spaceT);
+    spaceT = setTimeout(() => {
+      if (convo || paused || p.downed) return;
+      const sideKey = keys.KeyA || keys.KeyD || keys.ArrowLeft || keys.ArrowRight, backKey = keys.KeyS || keys.ArrowDown;
+      if (backKey) { if (p.drawn && !p.drawing) jumpBack(p); }
+      else if (!sideKey) jump(p);
+    }, SPACE_WINDOW);
+  } else if (!modern && (e.code === 'AltLeft' || e.code === 'AltRight' || e.code === 'KeyV')) jump(p);
+  if (e.code === 'Tab') { walkOn = !walkOn; flash(walkOn ? 'Walking' : 'Running'); }
   if ((modern ? e.code === 'KeyX' : e.code === 'KeyC') || e.code === 'NumpadMultiply') { sneakOn = !sneakOn; flash(sneakOn ? 'Sneaking' : 'Running'); }
   if (e.code === 'KeyT') { const order = ['', '1HST1', '1HST2']; setStyle(order[(order.indexOf(p.style) + 1) % 3]); flash('One-handed: ' + STYLE_NAMES[p.style]); }
   if (e.code === 'KeyM') toggleMusic();
   if (e.code === 'KeyR' && p.downed && p.act && p.act.type === 'down') getUp(p);
 }
+const TURN_RATE = 2.6; // rad/s: turning on the spot with A/D (modern scheme)
 function playerInput(dt) {
   const p = player, k = keys;
-  p.mv.f = 0; p.mv.s = 0;
+  p.mv.f = 0; p.mv.s = 0; p.mv.turn = 0;
   if (p.downed || lockedUI) return;
   p.mv.f = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0);
-  p.mv.s = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
-  p.gait = sneakOn ? 'sneak' : k.ShiftLeft || k.ShiftRight ? 'walk' : 'run';
+  const side = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
+  p.gait = sneakOn ? 'sneak' : walkOn !== !!(k.ShiftLeft || k.ShiftRight) ? 'walk' : 'run';
+  const modern = scheme === 'modern', back = k.KeyS || k.ArrowDown, strafeMod = rmb || k.Space;
+  // modern: A/D turn on the spot (armed or not); with the right mouse button held they strafe instead,
+  // and right mouse + S parries. Gothic scheme: A/D strafe, right mouse parries.
+  if (!modern || strafeMod) p.mv.s = side;
+  else if (side && !(p.drawn && actionHeld())) { p.heading -= side * TURN_RATE * dt; p.mv.turn = side; }
   if (p.drawn && actionHeld()) { p.mv.f = 0; p.mv.s = 0; } // holding the action key: the direction keys fight, not walk
-  if (p.drawn && !p.drawing && p.mv.f < 0) { p.mv.f = 0; if (!p.act) jumpBack(p); }
-  if (rmb && p.drawn && !p.drawing && !p.act) parade(p);
+  const parry = p.drawn && rmb && (!modern || back);
+  if (parry) { p.mv.f = 0; if (!p.drawing && !p.act) parade(p); }
+  else if (!modern && p.drawn && !p.drawing && p.mv.f < 0) { p.mv.f = 0; if (!p.act) jumpBack(p); } // modern: Space + S jumps back
+  else if (modern && back && k.Space && p.drawn) p.mv.f = 0; // armed: Space + S jumps back (on the key press); unarmed: walk back
   // locked focus (modern scheme): keep facing the target; A/D then circle around it
   if (lockOn && (lockOn.downed || dist2(p, lockOn) > LOCK_RANGE)) lockOn = null;
   if (actionHeld() && !lockOn) acquireLock(); // still holding: take the next target that comes into view
@@ -1474,7 +1497,7 @@ function updateHud() {
   $('ehp').style.display = foe ? 'block' : 'none';
   if (foe) { setText($('ehpn'), foe.name); $('ehpf').style.width = Math.max(0, (100 * foe.hp) / foe.maxHp) + '%'; }
   $('hpf').style.width = Math.max(0, (100 * p.hp) / p.maxHp) + '%';
-  setText($('gait'), sneakOn ? 'sneaking' : keys.ShiftLeft || keys.ShiftRight ? 'walking' : '');
+  setText($('gait'), sneakOn ? 'sneaking' : walkOn !== !!(keys.ShiftLeft || keys.ShiftRight) ? 'walking' : '');
 }
 
 // ---------------------------------------------------------------- main loop
