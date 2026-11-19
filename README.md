@@ -71,7 +71,7 @@ The mouse turns the hero in both.
 | parry | right click, or action + S | right click, or S + left click |
 | jump back (weapon drawn) | S | S |
 | talk | action key (weapon sheathed) | E |
-| pick a dialogue option | ↑/↓ + Enter, or 1–7 | same |
+| pick a dialogue option | mouse wheel + left click, ↑/↓ + Enter, or 1–7 | same |
 | skip the line being spoken | right click | right click |
 | look back | R (hold) | – |
 | get up after a knock-down | R | R |

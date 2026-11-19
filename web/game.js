@@ -1059,9 +1059,9 @@ function openMenu(n) {
   n.cast.topics.forEach(t => t.lines.forEach(l => loadSound(l.wav)));
   // Gothic's choice box: plain lines across the bottom of the screen, the selected one in the highlighted font
   opts.forEach((o, i) => {
-    const d = document.createElement('div'); m.appendChild(d); o.el = d; d.onclick = o.run; d.onmouseenter = () => selectOpt(i);
+    const d = document.createElement('div'); m.appendChild(d); o.el = d; d.onmouseenter = () => selectOpt(i);
   });
-  convo.opts = opts; convo.sel = -1; selectOpt(0);
+  convo.opts = opts; convo.sel = -1; convo.openedAt = performance.now(); selectOpt(0);
 }
 function selectOpt(i) {
   const o = convo.opts; convo.sel = (i + o.length) % o.length;
@@ -1087,7 +1087,18 @@ function playTopic(n, t) {
   next();
 }
 // right click skips the line being spoken (the pointer is free during a conversation, so this has its own listener)
-addEventListener('mousedown', e => { if (e.button === 2 && convo && convo.state === 'talk' && convo.skip) convo.skip(); });
+// mouse in a conversation: the wheel moves through the choices, left click takes the highlighted one (clicks in the
+// first moments are ignored: in the modern scheme the click that opened the talk would otherwise pick at once),
+// right click skips the line being spoken. The pointer is free while talking, so these have their own listeners.
+addEventListener('mousedown', e => {
+  if (!convo) return;
+  if (e.button === 2 && convo.state === 'talk' && convo.skip) convo.skip();
+  if (e.button === 0 && convo.state === 'menu' && performance.now() - convo.openedAt > 300) convo.opts[convo.sel].run();
+});
+addEventListener('wheel', e => {
+  if (!convo || convo.state !== 'menu' || !e.deltaY) return;
+  e.preventDefault(); selectOpt(convo.sel + Math.sign(e.deltaY));
+}, { passive: false });
 function closeConvo() { if (convo) convo.npc.talking = false; convo = null; lockedUI = false; $('menu').style.display = 'none'; $('hp').style.visibility = ''; setText($('sub'), ''); if (voiceAudio && voiceAudio.isPlaying) { voiceAudio.onEnded = () => {}; voiceAudio.stop(); } lockPointer(); }
 const flash = t => showMsg(t, 2000);
 function onKey(e) {
