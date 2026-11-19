@@ -940,7 +940,7 @@ function actionPress() {
   const p = player; if (p.downed) return;
   acquireLock();
   if (!p.drawn && !p.drawing) { interact(); return; }
-  const held = Object.keys(ACTION_DIRS).find(k => keys[k]); if (held) actionInput(ACTION_DIRS[held]); // direction already down
+  const held = Object.keys(ACTION_DIRS).find(k => keys[k] && !(keys.Space && 'LR'.includes(ACTION_DIRS[k]))); if (held) actionInput(ACTION_DIRS[held]); // direction already down
 }
 function interact() {
   const p = player, n = p.focus && !p.focus.hostile && !p.focus.downed && dist2(p, p.focus) < 3.2 ? p.focus : null;
@@ -1121,7 +1121,8 @@ function onKey(e) {
   const modern = scheme === 'modern';
   if (modern) {
     if (e.code === 'KeyE') actionPress();
-    else if (ACTION_DIRS[e.code] && actionHeld() && (p.drawn || p.drawing) && !p.downed) actionInput(ACTION_DIRS[e.code]); // action + direction
+    else if (ACTION_DIRS[e.code] && actionHeld() && (p.drawn || p.drawing) && !p.downed && !(keys.Space && 'LR'.includes(ACTION_DIRS[e.code])))
+      actionInput(ACTION_DIRS[e.code]); // action + direction (with Space, A/D strafe instead of swinging)
   } else if (e.code === 'KeyE' && !p.downed && !p.drawn) interact();
   if ((modern ? e.code === 'ControlLeft' || e.code === 'ControlRight' : e.code === 'Space' || e.code === 'KeyF') && !p.downed) toggleWeapon(p);
   if (modern && e.code === 'Space') {
@@ -1131,7 +1132,7 @@ function onKey(e) {
     spaceT = setTimeout(() => {
       if (convo || paused || p.downed) return;
       if (keys.KeyS || keys.ArrowDown) { if (p.drawn && !p.drawing) jumpBack(p); }
-      else jump(p);
+      else if (!actionHeld()) jump(p); // while focusing, Space is the strafe modifier, not a jump
     }, SPACE_WINDOW);
   } else if (!modern && (e.code === 'AltLeft' || e.code === 'AltRight' || e.code === 'KeyV')) jump(p);
   if (e.code === 'Tab') { walkOn = !walkOn; flash(walkOn ? 'Walking' : 'Running'); }
@@ -1148,12 +1149,12 @@ function playerInput(dt) {
   p.mv.f = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0);
   const side = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
   p.gait = sneakOn ? 'sneak' : walkOn !== !!(k.ShiftLeft || k.ShiftRight) ? 'walk' : 'run';
-  const modern = scheme === 'modern', back = k.KeyS || k.ArrowDown, strafeMod = rmb;
+  const modern = scheme === 'modern', back = k.KeyS || k.ArrowDown, strafeMod = rmb || (actionHeld() && k.Space); // focusing (action held): Space + A/D strafe around the target
   // modern: A/D turn on the spot (armed or not); only with the right mouse button held do they strafe,
   // and right mouse + S parries. Gothic scheme: A/D strafe, right mouse parries.
   if (!modern || strafeMod) p.mv.s = side;
   else if (side && !(p.drawn && actionHeld())) { p.heading -= side * TURN_RATE * dt; p.mv.turn = side; }
-  if (p.drawn && actionHeld()) { p.mv.f = 0; p.mv.s = 0; } // holding the action key: the direction keys fight, not walk
+  if (p.drawn && actionHeld()) { p.mv.f = 0; if (!k.Space) p.mv.s = 0; } // holding the action key: the direction keys fight, not walk (Space + A/D still strafe)
   const parry = p.drawn && rmb && (!modern || back);
   if (parry) { p.mv.f = 0; if (!p.drawing && !p.act) parade(p); }
   else if (!modern && p.drawn && !p.drawing && p.mv.f < 0) { p.mv.f = 0; if (!p.act) jumpBack(p); } // modern: Space + S jumps back
