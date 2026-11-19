@@ -26,11 +26,12 @@ canvas.gt{display:inline-block;vertical-align:top}
 #ehp .gbar{margin-top:2px}
 #gait{position:absolute;left:18px;bottom:calc(20px + 26px * var(--ui,1))}
 #pause{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:4}
-#pause .panel{background:rgba(18,14,8,.96);border:1px solid #8a7a50;padding:22px 28px;width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box}
+#pause .panel{background:rgba(18,14,8,.96);border:1px solid #8a7a50;padding:22px 28px;width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box}
 #pause h2{margin:0 0 14px;font-weight:normal;letter-spacing:3px;color:#e0b860;text-align:center}
 #pause h3{margin:16px 0 6px;font-weight:normal;color:#e0b860;font-size:15px;border-bottom:1px solid #4a3a1a;padding-bottom:4px}
-.legend{width:100%;border-collapse:collapse;font-size:14px}
-.legend td{padding:3px 4px;vertical-align:top}.legend td:first-child{white-space:nowrap;width:42%}
+.legend{width:100%;border-collapse:collapse;font-size:14px;table-layout:fixed}
+.legend td{padding:4px 6px;vertical-align:top;overflow-wrap:anywhere}.legend td:first-child{width:44%}.legend tr+tr td{border-top:1px solid rgba(138,122,80,.18)}
+.legend kbd{white-space:nowrap}
 kbd{display:inline-block;min-width:18px;padding:1px 6px;margin:1px 2px 1px 0;border:1px solid #8a7a50;border-bottom-width:2px;border-radius:3px;background:#2a2012;font:12px/1.4 Georgia,serif;text-align:center;color:#f0e4c8}
 #journal .jtitle{color:#e0b860;margin:2px 0 6px}#journal .jentry{font-size:14px;margin:0 0 6px;padding-left:10px;border-left:2px solid #4a3a1a}#journal .jore{font-size:13px;opacity:.75;margin-top:4px}
 .row select{flex:1;font:14px Georgia,serif;color:#e8dcc0;background:#2a2012;border:1px solid #8a7a50;padding:4px 6px}
@@ -96,7 +97,7 @@ kbd{display:inline-block;min-width:18px;padding:1px 6px;margin:1px 2px 1px 0;bor
 <div id="pause" role="dialog" aria-modal="true" aria-labelledby="pauseTitle"><div class="panel">
  <h2 id="pauseTitle">PAUSED</h2>
  <h3>Controls</h3>
- <div class="row"><label for="scheme">Scheme</label><select id="scheme"><option value="modern">Modern (left mouse / E action + W/A/D attack, right parry)</option><option value="gothic">Gothic (original keys)</option></select></div>
+ <div class="row"><label for="scheme">Scheme</label><select id="scheme"><option value="modern">Modern (action key + W/A/D to fight, Space / right mouse to jump, strafe, parry)</option><option value="gothic">Gothic (original keys)</option></select></div>
  <div id="pauseLegend"></div>
  <h3>Journal</h3><div id="journal"></div>
  <h3>Sound</h3>
