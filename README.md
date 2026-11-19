@@ -10,7 +10,8 @@ copyrighted, so this repo never contains them: `export/` is git-ignored and neve
 
 For development and tests without Gothic, the repo includes **stand-in assets** (`standin/`): original placeholder
 content in the same formats (a small arena with huts, doors and climbable crates, a boxy cast, procedural
-animations, fonts, sounds). A plain clone runs on them, and so does the GitHub Pages build.
+animations, fonts, sounds, and the arena story voiced with stock synthetic voices). A plain clone runs on them, and
+so does the GitHub Pages build.
 
 ## Quick start
 
@@ -104,6 +105,7 @@ Damage is Gothic 1's: strength + weapon damage − the target's protection again
 | `tools/render/` | `render-music.c`: C renderer on GothicKit/dmusic (dmusic itself is cloned to `tools/dmusic`, git-ignored) |
 | `web/` | the game: `index.html` + `game.js` |
 | `standin/` | committed stand-in assets (original, not from Gothic) used when `export/` is missing |
+| `tools/standin/voice_standin.py` | voices the stand-in cast's story lines with stock Piper voices → `standin/audio/VO_*.wav` |
 | `tools/standin/make_standin.py` | generates `standin/` (numpy + Pillow only, deterministic). `?assets=standin` / `?assets=export` forces a set |
 | `.github/workflows/pages.yml` | deploys `web/` + `standin/` to GitHub Pages (never Gothic's assets) |
 | `docs/PIPELINE.md` | how extraction works, file formats, coordinate conversion, pitfalls |
@@ -119,3 +121,5 @@ Gothic-derived assets are never published.
 
 Gothic © Piranha Bytes / THQ Nordic. This is a non-commercial fan project and requires an owned copy of the game.
 ZenKit and dmusic by the GothicKit contributors (MIT). three.js (MIT).
+Stand-in voices: generated with [Piper](https://github.com/rhasspy/piper) (MIT) using the `en_US-libritts_r-medium`
+voice, trained on [LibriTTS-R](https://www.openslr.org/141/) (CC BY 4.0, Koizumi et al., 2023).

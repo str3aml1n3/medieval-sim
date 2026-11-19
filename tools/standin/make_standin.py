@@ -6,8 +6,8 @@ clone of the repository (development, tests, CI) without a Gothic install. Write
 Nothing here is taken from Gothic: geometry, skeleton, animations, textures, fonts (rendered from Pillow's bundled
 free font) and sounds are generated. Names of files, clips, bones, waypoints and NPC ids match what web/game.js asks
 for, so the same code paths run. NPC stats mirror the extracted data so fights balance the same while developing.
-Dialogue is the authored story in dialogue/arena.json, with these placeholder names; voice lines are deliberately
-absent (the game shows each subtitle for 1.5 s when its voice file is missing).
+Dialogue is the authored story in dialogue/arena.json, with these placeholder names. Its voice lines
+(standin/audio/VO_*.wav) come from tools/standin/voice_standin.py (stock Piper voices); this script leaves them alone.
 Needs numpy and Pillow only; deterministic (fixed seed), so re-running gives identical files.
 """
 import json, math, os, struct, sys, wave

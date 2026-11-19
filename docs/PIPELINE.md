@@ -206,7 +206,8 @@ What it generates, and the contract it keeps with the game:
 | `waypoints.json` | the waypoint names the game places NPCs at (`OCR_ARENA_01..09`, `OCR_OUTSIDE_ARENA*`, `OCR_ARENA_BARONS_HUT`) |
 | `chars.json` | a 23-bone biped using the bone names the game looks up (`BIP01 L/R FOOT`, `ZS_RIGHTHAND`, `ZS_SWORD`, `ZS_LONGSWORD`, ...), rest rotations identity for body bones; box outfits/heads rigidly skinned; sword, mace, greatsword; `looks` for the game's NPC ids with stats equal to the extracted ones |
 | `anims.json` | every clip name the game plays (59), posed procedurally: gaits with root-motion speeds, jumps, the three climb sequences with root rises of 0.97 / 1.48 / 2.63 m ending 0.75 m forward, attacks with `optimal_frame` / `hit_end` / `combo_window` events, the weapon draw as an upper-body overlay with `set_fight_mode`, knock-downs, spectator and dialogue overlays |
-| `dialogue.json` | the cast with invented names and placeholder topics; voice files are deliberately absent (the game shows each subtitle for 1.5 s) |
+| `dialogue.json` | the cast with invented names and the authored story (`dialogue/arena.json`) |
+| `audio/VO_*.wav` | the story's lines voiced by `tools/standin/voice_standin.py`: stock Piper voices (en_US-libritts_r, CC BY 4.0), one speaker per character cast by pitch, 16 kHz |
 | `ui/` | font atlases + glyph tables rendered from Pillow's bundled font, HUD bars, dialogue box, sky layers, sun, barrier veins, lightning frames, rain clouds |
 | `tex/`, `audio/` | procedural textures; synthesised footsteps, clashes, hits, draws, doors, rain, barrier crackle, hero grunts |
 

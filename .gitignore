@@ -6,3 +6,4 @@ node_modules/
 tools/dmusic/
 tools/render/build/
 tools/voice/.venv/
+tools/voice/piper/
