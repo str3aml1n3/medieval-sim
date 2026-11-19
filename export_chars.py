@@ -116,6 +116,7 @@ vm.register_external('EquipItem',_eq,DI,int)
 vm.register_external('Mdl_SetModelScale',_scale,DI,float,float,float)
 vm.register_external('Mdl_SetModelFatness',lambda n,f: rec.update(fat=round(f,3)),DI,float)
 vm.register_external('Mdl_ApplyOverlayMds',lambda n,m: rec.update(overlay=stem(m).replace('HUMANS_','')),DI,str)
+vm.register_external('CreateInvItems',lambda n,i,c: rec.setdefault('inv',{}).update({vm.get_symbol_by_index(i).name: c}),DI,int,int)
 vm.register_external('Npc_SetTalentSkill',lambda n,t,v: rec.setdefault('talent',{}).update({t:v}),DI,int,int)
 vm.register_external_default(lambda s: None)   # every other external (routines, attributes, inventory) is irrelevant here
 ITEM_SWD,ITEM_AXE,ITEM_2HD_SWD,ITEM_2HD_AXE,ITEM_KAT_NF,ITEM_KAT_FF,ITEM_CROSSBOW=16384,32768,65536,131072,2,4,1048576
@@ -128,6 +129,7 @@ def dtype(it): return DAMAGE_NAMES[(it.damage_type & -it.damage_type).bit_length
 # the player's own gear (not scripted): guard armour and a crude sword, with Gothic's values
 out['items']={n:{'prot':protection(item(n))} for n in ['GRD_ARMOR_M']}
 _sw=item('ITMW_1H_SWORD_01'); out['items']['ITMW_1H_SWORD_01']={'dmg':_sw.damage_total,'dtype':dtype(_sw),'range':_sw.range}
+_cb=item('ITRW_CROSSBOW_01'); out['items']['ITRW_CROSSBOW_01']={'id':'ITRW_CROSSBOW_01','name':_cb.name,'kind':'cbow','slot':'ZS_CROSSBOW','dmg':_cb.damage_total,'dtype':dtype(_cb),'ammoId':'ITAMBOLT'}
 def stem(f): return os.path.splitext(f)[0].upper()
 def variant(tex,v=None,c=None):
     # Gothic swaps texture variants by name: ..._V<n> is the body/head/teeth variant, _C<n> the skin colour
@@ -136,6 +138,10 @@ def variant(tex,v=None,c=None):
     if c is not None: tex=re.sub(r'_C\d+',f'_C{c}',tex,count=1)
     return tex
 out['looks']={}
+def ammo_mesh(ammo_id):
+    # arrows and bolts: the ammunition item's own mesh, shown nocked and in flight
+    if ammo_id and ammo_id not in out['weaponsLocal']:
+        it=item(ammo_id); out['weaponsLocal'][ammo_id]=local_part(zenkit.MultiResolutionMesh.load(vfs.find(stem(it.visual)+'.MRM').open()))
 for cid in CAST_IDS:
     inst=next(x.name for x in vm.symbols if x.name.endswith('_'+cid) and x.type==zenkit.DaedalusDataType.INSTANCE)
     rec.clear(); npc=vm.init_instance(inst, zenkit.DaedalusInstanceType.NPC)
@@ -170,13 +176,16 @@ for cid in CAST_IDS:
         elif it.main_flag==ITEM_KAT_FF and not ranged:
             if wkey not in out['weaponsLocal']:   # bows and crossbows are morph meshes (they animate when drawn)
                 out['weaponsLocal'][wkey]=local_part(zenkit.MorphMesh.load(vfs.find(stem(it.visual)+'.MMB').open()).mesh)
-            ranged={'id':wkey,'slot':'ZS_CROSSBOW' if it.flags&ITEM_CROSSBOW else 'ZS_BOW'}
+            cbow=bool(it.flags&ITEM_CROSSBOW); ammo_id=vm.get_symbol_by_index(it.munition).name if it.munition>0 else None
+            ranged={'id':wkey,'name':it.name,'kind':'cbow' if cbow else 'bow','slot':'ZS_CROSSBOW' if cbow else 'ZS_BOW',
+                    'dmg':it.damage_total,'dtype':dtype(it),'ammoId':ammo_id,'ammo':rec.get('inv',{}).get(ammo_id,0)}
+            ammo_mesh(ammo_id)
     # fighting talent for the weapon in hand: 0 untrained, 1 trained (xHST1), 2 master (xHST2)
     two=bool(weapon and weapon['twoHanded']); lvl=rec.get('talent',{}).get(NPC_TALENT_2H if two else NPC_TALENT_1H,0)
     style=(('2H' if two else '1H')+'ST'+str(lvl)) if lvl else ''
     out['looks'][cid]={'instance':inst,'outfit':okey,'head':hkey,'tex':swap,'weapon':weapon,'ranged':ranged,'scale':rec.get('scale',[1,1,1]),
                        'fat':rec.get('fat',0),'overlay':rec.get('overlay'),'style':style,
-                       'hp':npc.get_attribute(ATR.HITPOINTS_MAX),'str':npc.get_attribute(ATR.STRENGTH),'prot':prot}
+                       'hp':npc.get_attribute(ATR.HITPOINTS_MAX),'str':npc.get_attribute(ATR.STRENGTH),'dex':npc.get_attribute(ATR.DEXTERITY),'prot':prot}
     print('look',cid,out['looks'][cid])
 # sanity: model height
 allp=np.array([out['outfits']['GRDM'][i]['p'] for i in range(len(out['outfits']['GRDM']))],dtype=object)

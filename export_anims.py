@@ -29,6 +29,11 @@ BASE = [
     'T_MOVE_2_2HMOVE', 'S_2HRUN', 'S_2HRUNL', 'S_2HWALKL', 'S_2HSNEAK', 'S_2HSNEAKL',
     'T_2HRUNSTRAFEL', 'T_2HRUNSTRAFER', 'T_2HSNEAKSTRAFEL',
     'S_2HATTACK', 'T_2HATTACKL', 'T_2HATTACKR', 'T_2HPARADE_O', 'T_2HPARADEJUMPB',
+    # bow and crossbow: draw, move with it, raise to aim, the aim pose (C_*_5: straight ahead), shoot, reload
+    *[n for w in ('BOW', 'CBOW') for n in (
+        f'T_MOVE_2_{w}MOVE', f'S_{w}RUN', f'S_{w}RUNL', f'S_{w}WALKL', f'S_{w}SNEAK', f'S_{w}SNEAKL',
+        f'T_{w}RUNSTRAFEL', f'T_{w}RUNSTRAFER', f'T_{w}SNEAKSTRAFEL', f'T_{w}RUNTURNL', f'T_{w}RUNTURNR',
+        f'T_{w}RUN_2_{w}AIM', f'C_{w}_5', f'S_{w}SHOOT', f'T_{w}RELOAD', f'T_{w}AIM_2_{w}RUN', f'T_{w}JUMPB')],
     # hit / down
     'T_STUMBLE', 'T_STUMBLEB', 'T_STAND_2_WOUNDED', 'S_WOUNDED', 'T_WOUNDED_2_STAND',
     'T_STAND_2_WOUNDEDB', 'S_WOUNDEDB', 'T_WOUNDEDB_2_STAND',
@@ -58,7 +63,7 @@ def events(a):
     ev = {}
     for e in a.event_tags:
         k = EV.get(int(e.type))
-        if k in ('OPTIMAL_FRAME', 'HIT_END', 'COMBO_WINDOW', 'SET_FIGHT_MODE', 'PARRY_FRAME'):
+        if k in ('OPTIMAL_FRAME', 'HIT_END', 'COMBO_WINDOW', 'SET_FIGHT_MODE', 'PARRY_FRAME', 'MUNITION_PLACE'):
             fr = list(e.frames) if len(e.frames) else [e.frame]
             ev[k.lower()] = [f - a.first_frame for f in fr]  # MDS frames are ASC frames; MAN frame 0 = first_frame
     return ev

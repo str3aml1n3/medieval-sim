@@ -388,6 +388,34 @@ def head(style):
     return list(parts.values())
 
 
+def box_part(parts, tex, lo, hi):
+    g = parts.setdefault(tex, {'tex': tex, 'p': [], 'u': []})
+    for c, n in box_faces(lo, hi):
+        uvq = [(0, 1), (1, 1), (1, 0), (0, 0)]
+        for tri in ((0, 1, 2), (0, 2, 3)):
+            a, b, cc = oriented(c[tri[0]], c[tri[1]], c[tri[2]], n)
+            for p in (a, b, cc): g['p'] += [round(v, 4) for v in p]; g['u'] += list(uvq[c.index(p)])
+
+
+def ranged_mesh(kind):
+    """in the hand's space: a bow's limbs run along z (upright when the arm points forward), a crossbow's stock
+    along -y (forward along the aiming arm) with its bow across x; ammunition points along -x (the game flies it so)"""
+    parts = {}
+    if kind == 'bow':
+        for i in range(8):  # a curved bow from 8 segments
+            z0, z1 = -0.65 + i * 0.1625, -0.65 + (i + 1) * 0.1625; zc = (z0 + z1) / 2; bend = 0.12 * (1 - (zc / 0.65) ** 2)
+            box_part(parts, 'SI_GRIP', (-0.015, -bend - 0.015, z0), (0.015, -bend + 0.015, z1))
+    elif kind == 'cbow':
+        box_part(parts, 'SI_GRIP', (-0.025, -0.55, -0.03), (0.025, 0.12, 0.03))      # stock
+        box_part(parts, 'SI_METAL', (-0.32, -0.5, -0.015), (0.32, -0.46, 0.015))     # bow arms
+    else:
+        L = 0.75 if kind == 'arrow' else 0.4
+        box_part(parts, 'SI_GRIP', (-L + 0.08, -0.006, -0.006), (0.06, 0.006, 0.006))  # shaft
+        box_part(parts, 'SI_METAL', (-L, -0.015, -0.015), (-L + 0.08, 0.015, 0.015))   # head at -x
+        box_part(parts, 'SI_HAIR', (0.0, -0.025, -0.002), (0.06, 0.025, 0.002))         # fletching
+    return list(parts.values())
+
+
 def weapon(blade_len, kind):
     """a weapon in its slot's space: grip at the origin, the blade/head along -z"""
     parts = {}
@@ -558,6 +586,40 @@ def build_anims():
     C['T_MOVE_2_1HMOVE'] = make_clip(20, keyed([(0, IDLE), (9, grab), (19, {k: v for k, v in READY.items() if k != 'root'})]),
                                      nodes=UPPER_NODES, ev={'set_fight_mode': [9]})
 
+    # bow and crossbow: carry, draw (overlay, set_fight_mode + munition_place), raise to aim, aim, shoot, reload
+    HOLD = {'bow': {'BIP01 L UPPERARM': (20, 0, -10), 'BIP01 L FOREARM': (30, 0, 0)},
+            'cbow': {'BIP01 R UPPERARM': (30, 0, 8), 'BIP01 R FOREARM': (60, 0, 0), 'BIP01 L UPPERARM': (35, 0, -5), 'BIP01 L FOREARM': (70, 0, 20)}}
+    AIM = {'bow': {'BIP01 L UPPERARM': (90, 0, 0), 'BIP01 L FOREARM': (0, 0, 0), 'BIP01 R UPPERARM': (90, 0, 25), 'BIP01 R FOREARM': (20, 0, 0),
+                   'BIP01 SPINE': (0, 25, 0), 'BIP01 HEAD': (0, -20, 0)},
+           'cbow': {'BIP01 R UPPERARM': (85, 0, 0), 'BIP01 R FOREARM': (0, 0, 0), 'BIP01 L UPPERARM': (85, 0, 15), 'BIP01 L FOREARM': (15, 0, 25)}}
+    for kind, K in (('bow', 'BOW'), ('cbow', 'CBOW')):
+        hold, aim = HOLD[kind], AIM[kind]
+        held = lambda fn, hold=hold: (lambda f: merge(fn(f), hold))
+        C[f'S_{K}RUN'] = make_clip(2, lambda f, hold=hold: merge(IDLE, hold, {'root': (0, STAND_Y, 0)}))
+        C[f'S_{K}SNEAK'] = make_clip(2, lambda f, hold=hold: merge(sneak_idle(False)(f), hold))
+        n, fn = gait(0.62, 34, 50, 0, 6, 0.04); C[f'S_{K}RUNL'] = make_clip(n, held(fn), speed=3.2)
+        n, fn = gait(1.0, 22, 25, 0, 2, 0.02); C[f'S_{K}WALKL'] = make_clip(n, held(fn), speed=1.4)
+        n, fn = gait(1.3, 18, 20, 0, 0, 0.0, crouch=1.0); C[f'S_{K}SNEAKL'] = make_clip(n, held(fn), speed=1.0)
+        n, fn = gait(0.6, 22, 30, 0, 4, 0.03, side=True)
+        C[f'T_{K}RUNSTRAFEL'] = make_clip(n, held(fn), speed=2.8); C[f'T_{K}RUNSTRAFER'] = make_clip(n, held(fn), speed=2.8)
+        n, fn = gait(1.0, 12, 10, 0, 0, 0.0, crouch=1.0, side=True); C[f'T_{K}SNEAKSTRAFEL'] = make_clip(n, held(fn), speed=0.9)
+        for side, sgn in (('L', 1), ('R', -1)):
+            n, fn = gait(0.7, 10, 22, 0, 0, 0.0)
+            C[f'T_{K}RUNTURN{side}'] = make_clip(n, lambda f, fn=fn, sgn=sgn, hold=hold: merge(fn(f), hold, {'BIP01 SPINE': (0, 8 * sgn, 0)}))
+        base = merge(IDLE, hold, {'root': (0, STAND_Y, 0)}); aimp = merge(base, aim)
+        C[f'T_{K}RUN_2_{K}AIM'] = make_clip(10, keyed([(0, base), (9, aimp)]))
+        C[f'T_{K}AIM_2_{K}RUN'] = make_clip(10, keyed([(0, aimp), (9, base)]))
+        C[f'C_{K}_5'] = make_clip(1, lambda f, aimp=aimp: aimp)
+        C[f'S_{K}SHOOT'] = make_clip(2, keyed([(0, merge(aimp, {'BIP01 SPINE': (6, 25 if kind == 'bow' else 0, 0)})), (1, aimp)]))
+        reach = merge(aimp, {'BIP01 R UPPERARM': (40, 0, 30), 'BIP01 R FOREARM': (100, 0, 0)} if kind == 'bow'
+                      else {'BIP01 L UPPERARM': (40, 0, -10), 'BIP01 L FOREARM': (110, 0, 0)})
+        C[f'T_{K}RELOAD'] = make_clip(30, keyed([(0, aimp), (12, reach), (29, aimp)]), ev={'munition_place': [12]})
+        over = merge(dict(IDLE), {'BIP01 R UPPERARM': (165, 0, 20), 'BIP01 R FOREARM': (90, 0, 0)} if kind == 'bow'
+                     else {'BIP01 L UPPERARM': (160, 0, -15), 'BIP01 R UPPERARM': (160, 0, 15)})
+        C[f'T_MOVE_2_{K}MOVE'] = make_clip(18, keyed([(0, IDLE), (7, over), (17, hold)]), nodes=UPPER_NODES, ev={'set_fight_mode': [7], 'munition_place': [9]})
+        hopk = keyed([(0, base), (5, merge(base, {'BIP01 L THIGH': (40, 0, 0), 'BIP01 R THIGH': (40, 0, 0), 'BIP01 L CALF': (-60, 0, 0), 'BIP01 R CALF': (-60, 0, 0)})), (12, base)])
+        C[f'T_{K}JUMPB'] = make_clip(13, lambda f, hopk=hopk: merge(hopk(f), {'root': (0, STAND_Y + 0.1 * math.sin(math.pi * f / 12), 0.9 * min(1, f / 12))}))
+
     # hits and knock-downs
     for name, sgn in (('T_STUMBLE', 1), ('T_STUMBLEB', -1)):
         rock = merge(READY, {'BIP01 SPINE': (22 * sgn, 0, 0), 'BIP01 L UPPERARM': (40, 0, -40), 'BIP01 HEAD': (15 * sgn, 0, 0)})
@@ -606,7 +668,12 @@ CAST = [  # id (the game's), stand-in name, role, outfit, head, weapon, two-hand
 def build_chars():
     outfits = {k: outfit(k) for k in ('GRDM', 'GRDL', 'GRDS', 'STTM', 'SLDM', 'TPLL', 'BODY_COOKSMITH')}
     heads = {k: head(k) for k in ('FIGHTER', 'BALD', 'FATBALD', 'THIEF', 'PSIONIC', 'PONY')}
-    weapons = {'sword': weapon(0.85, 'sword'), 'SI_SWORD': weapon(0.85, 'sword'), 'SI_MACE': weapon(0.5, 'mace'), 'SI_GREATSWORD': weapon(1.2, 'sword')}
+    weapons = {'sword': weapon(0.85, 'sword'), 'SI_SWORD': weapon(0.85, 'sword'), 'SI_MACE': weapon(0.5, 'mace'), 'SI_GREATSWORD': weapon(1.2, 'sword'),
+               'SI_BOW': ranged_mesh('bow'), 'SI_CROSSBOW': ranged_mesh('cbow'), 'SI_ARROW': ranged_mesh('arrow'), 'SI_BOLT': ranged_mesh('bolt')}
+    BOW = {'id': 'SI_BOW', 'name': 'Hunting Bow', 'kind': 'bow', 'slot': 'ZS_BOW', 'dmg': 24, 'dtype': 'point', 'ammoId': 'SI_ARROW'}
+    XBOW = {'id': 'SI_CROSSBOW', 'name': 'Light Crossbow', 'kind': 'cbow', 'slot': 'ZS_CROSSBOW', 'dmg': 50, 'dtype': 'point', 'ammoId': 'SI_BOLT'}
+    RANGED = {'THORUS': (XBOW, 30), 'FLETCHER': (XBOW, 30), 'WHISTLER': (BOW, 10)}   # equipped as the cast is with Gothic
+    DEX = {'KIRGO': 15, 'THORUS': 80, 'BLOODWYN': 50, 'FLETCHER': 50, 'SNAF': 15, 'WHISTLER': 15, 'KHARIM': 20, 'GORHANIS': 25}
     bones = []
     for name, par, off, rot in BONES:
         L = mat_from(quat_euler(*(rot or (0, 0, 0))), off)
@@ -616,10 +683,13 @@ def build_chars():
         two = wid == 'SI_GREATSWORD'
         looks[cid] = {'instance': 'STANDIN_' + cid, 'outfit': out, 'head': hd, 'tex': {}, 'scale': [1, 1, 1], 'fat': 0, 'overlay': None,
                       'weapon': {'id': wid, 'name': wid, 'twoHanded': two, 'dmg': dmg, 'dtype': dtype, 'range': 150 if two else 100},
-                      'ranged': None, 'style': style, 'hp': hp, 'str': st, 'prot': {'edge': prot, 'blunt': prot} if prot else {}}
+                      'ranged': {**RANGED[cid][0], 'ammo': RANGED[cid][1]} if cid in RANGED else None, 'dex': DEX[cid],
+                      'style': style, 'hp': hp, 'str': st, 'prot': {'edge': prot, 'blunt': prot, 'point': prot // 5} if prot else {}}
     looks['HERO'] = {'instance': 'STANDIN_HERO', 'outfit': 'GRDM', 'head': 'PONY', 'tex': {}}  # the player: ponytail
-    items = {'GRD_ARMOR_M': {'prot': {'edge': 55, 'blunt': 55}}, 'ITMW_1H_SWORD_01': {'dmg': 20, 'dtype': 'edge', 'range': 100}}
-    save_json('chars.json', {'bones': bones, 'outfits': outfits, 'heads': heads, 'weapons': {}, 'weaponsLocal': weapons, 'items': items, 'looks': looks})
+    items = {'GRD_ARMOR_M': {'prot': {'edge': 55, 'blunt': 55, 'point': 10}}, 'ITMW_1H_SWORD_01': {'dmg': 20, 'dtype': 'edge', 'range': 100},
+             'ITRW_CROSSBOW_01': XBOW}
+    save_json('chars.json', {'bones': bones, 'outfits': outfits, 'heads': heads, 'weapons': {}, 'weaponsLocal': weapons, 'items': items, 'looks': looks,
+                             'nockRot': [0, 0, 90]})  # turns the nocked arrow (-x) along the drawing arm (-y)
     # the same authored story as with Gothic (dialogue/arena.json); {ID} tokens become these stand-in names in game
     sys.path.insert(0, ROOT); from dialogue import tree as story_tree
     story = story_tree.load(); cast = []

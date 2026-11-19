@@ -92,6 +92,20 @@ asks for unaccelerated movement. Mouse speed is a pause-menu slider (stored in `
   Gothic's arena fights. NPCs get up after 12–16 s; the player with R (or after 8 s).
 - **Focus**: the NPC in front of the hero; its name floats above it, its health shows at the top while fighting.
 
+## Bows and crossbows
+Gothic's loadout from the scripts: Thorus (two-handed sword) and Fletcher carry a light crossbow with 30 bolts,
+Whistler a rider's bow with 10 arrows; the player has a guard's light crossbow with 30 bolts (dexterity 50). On the
+back they hang at `ZS_CROSSBOW` / `ZS_BOW`; drawn (Gothic's `T_MOVE_2_BOWMOVE` / `T_MOVE_2_CBOWMOVE`, keys **1** / **2**)
+a bow sits in the left hand and a crossbow in the right, as Gothic binds them, and a bow shows its nocked arrow.
+
+A shot raises the weapon (`T_xRUN_2_xAIM`), holds the aim pose (`C_x_5`), releases (`S_xSHOOT`) and reloads
+(`T_xRELOAD`, the next arrow appears at its `MUNITION_PLACE` frame). Rules as OpenGothic implements Gothic 1: the
+projectile flies at 30 m/s under gravity, aimed at the target's centre with the arc compensated; the hit chance is
+100 % up close, the shooter's dexterity % at 20 m and nothing beyond 45 m (a miss is shot off to the side); a hit
+does the weapon's damage minus the target's protection against arrows (`point`); shots can't be parried. Anyone in
+the way is hit too; projectiles stick in walls. NPCs with ammunition and a clear line of sight shoot from beyond 7 m
+and switch to their melee weapon closer than 4.5 m.
+
 ## NPC AI (`aiStep`)
 | Duty | Behaviour |
 |---|---|

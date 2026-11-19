@@ -502,10 +502,23 @@ class Char {
       this.weapon.add(new THREE.Mesh(geo(p), mat));
     }
     this.slot(false);
-    // a bow or crossbow stays on the back (ZS_BOW / ZS_CROSSBOW); there is no ranged combat
-    if (o.ranged) for (const p of (chars.weaponsLocal && chars.weaponsLocal[o.ranged.id]) || []) {
-      const mat = new THREE.MeshLambertMaterial({ map: getTex(p.tex), alphaTest: 0.4, side: THREE.DoubleSide }); this.mats.push(mat);
-      this.bones[boneIdx[o.ranged.slot]].add(new THREE.Mesh(geo(p), mat));
+    // a bow or crossbow: on the back (ZS_BOW / ZS_CROSSBOW); drawn, a bow sits in the left hand and a crossbow in the
+    // right, as Gothic binds them. A drawn bow shows its nocked arrow in the right hand.
+    this.mode = 'melee'; // what is drawn when drawn: 'melee' or 'ranged'
+    if (o.ranged) {
+      this.rweapon = new THREE.Group(); this.nock = new THREE.Group(); this.nock.visible = false;
+      for (const p of (chars.weaponsLocal && chars.weaponsLocal[o.ranged.id]) || []) {
+        const mat = new THREE.MeshLambertMaterial({ map: getTex(p.tex), alphaTest: 0.4, side: THREE.DoubleSide }); this.mats.push(mat);
+        this.rweapon.add(new THREE.Mesh(geo(p), mat));
+      }
+      for (const p of (chars.weaponsLocal && chars.weaponsLocal[o.ranged.ammoId]) || []) {
+        const mat = new THREE.MeshLambertMaterial({ map: getTex(p.tex), alphaTest: 0.4, side: THREE.DoubleSide }); this.mats.push(mat);
+        this.nock.add(new THREE.Mesh(geo(p), mat));
+      }
+      if (chars.nockRot) this.nock.rotation.set(...chars.nockRot.map(THREE.MathUtils.degToRad)); // stand-ins: arrow along the arm
+      this.bones[boneIdx.ZS_RIGHTHAND].add(this.nock);
+      this.ammo = o.ranged.ammo || 0; this.ammo0 = this.ammo;
+      this.rslot(false);
     }
     this.cur = new Float32Array(NB * 4); this.snap = new Float32Array(NB * 4);
     rest.forEach((r, i) => r.q.toArray(this.cur, i * 4));
@@ -520,6 +533,11 @@ class Char {
   clip(name) {
     const look = n => (this.style && CLIPS[this.style + ':' + n]) || (this.ovl && CLIPS[this.ovl + ':' + n]) || CLIPS[n];
     return (this.twoHanded && look(name.replace(/1H/g, '2H'))) || look(name);
+  }
+  rslot(inHand) {
+    if (!this.rweapon) return;
+    const r = this.ranged, hand = r.kind === 'bow' ? 'ZS_LEFTHAND' : 'ZS_RIGHTHAND';
+    this.bones[boneIdx[inHand ? hand : r.slot]].add(this.rweapon);
   }
   slot(inHand) { this.bones[boneIdx[inHand ? 'ZS_RIGHTHAND' : this.twoHanded ? 'ZS_LONGSWORD' : 'ZS_SWORD']].add(this.weapon); }
   get fwd() { return new THREE.Vector3(-Math.sin(this.heading), 0, -Math.cos(this.heading)); }
@@ -607,13 +625,19 @@ const LOCO = {
     left: { run: 'T_1HRUNSTRAFEL', walk: 'T_1HRUNSTRAFEL', sneak: 'T_1HSNEAKSTRAFEL' }, right: { run: 'T_1HRUNSTRAFER', walk: 'T_1HRUNSTRAFER', sneak: '-T_1HSNEAKSTRAFEL' },
   },
 };
+for (const [k, K] of [['bow', 'BOW'], ['cbow', 'CBOW']]) LOCO[k] = {
+  idle: { run: `S_${K}RUN`, walk: `S_${K}RUN`, sneak: `S_${K}SNEAK` }, fwd: { run: `S_${K}RUNL`, walk: `S_${K}WALKL`, sneak: `S_${K}SNEAKL` },
+  back: { run: `S_${K}WALKL`, walk: `S_${K}WALKL`, sneak: `S_${K}SNEAKL` },
+  left: { run: `T_${K}RUNSTRAFEL`, walk: `T_${K}RUNSTRAFEL`, sneak: `T_${K}SNEAKSTRAFEL` }, right: { run: `T_${K}RUNSTRAFER`, walk: `T_${K}RUNSTRAFER`, sneak: `-T_${K}SNEAKSTRAFEL` },
+};
 const STEP_VOL = { run: 0.45, walk: 0.22, sneak: 0.04 };
+const weaponSet = c => (!c.drawn ? 'free' : c.mode === 'ranged' ? c.ranged.kind : '1h');
 // picks the locomotion clip; returns this frame's world-space displacement (speed comes from the clip's root motion)
 function locomote(c, dt) {
-  const { f, s } = c.mv, set = LOCO[c.drawn ? '1h' : 'free'];
+  const { f, s } = c.mv, set = LOCO[weaponSet(c)];
   const k = f > 0 ? 'fwd' : f < 0 ? 'back' : s < 0 ? 'left' : s > 0 ? 'right' : 'idle';
   let name = set[k][c.gait], rev = k === 'back';
-  if (k === 'idle' && c.mv.turn && c.gait !== 'sneak') name = (c.drawn ? 'T_1HRUNTURN' : 'T_RUNTURN') + (c.mv.turn < 0 ? 'L' : 'R');
+  if (k === 'idle' && c.mv.turn && c.gait !== 'sneak') name = ({ free: 'T_RUNTURN', '1h': 'T_1HRUNTURN', bow: 'T_BOWRUNTURN', cbow: 'T_CBOWRUNTURN' })[weaponSet(c)] + (c.mv.turn < 0 ? 'L' : 'R');
   if (name[0] === '-') { name = name.slice(1); rev = !rev; }
   const rate = (k === 'left' || k === 'right') && c.gait === 'walk' ? 0.6 : 1;
   c.play(name, { loop: true, rev, rate, blend: 0.2 });
@@ -653,7 +677,8 @@ const PLAYER_START = () => (WP.OCR_OUTSIDE_ARENA || new THREE.Vector3(49.7, -9.5
 // the hero: Gothic's own head, face and skin (PC_HERO: the ponytail), in guard armour with a sword
 const HERO_LOOK = (chars.looks && chars.looks.HERO) || { head: 'PONY', tex: {} };
 const player = new Char({ name: 'You', outfit: 'GRDM', head: chars.heads[HERO_LOOK.head] ? HERO_LOOK.head : 'FIGHTER', tex: HERO_LOOK.tex, weapon: 'sword', isPlayer: true, hp: 220, maxHp: 220, str: 70,
-  wdmg: PLAYER_SWORD.dmg, dtype: PLAYER_SWORD.dtype, reach: reachOf(PLAYER_SWORD.range), prot: PLAYER_ARMOR, style: store.get('style', '') });
+  wdmg: PLAYER_SWORD.dmg, dtype: PLAYER_SWORD.dtype, reach: reachOf(PLAYER_SWORD.range), prot: PLAYER_ARMOR, style: store.get('style', ''),
+  ranged: ITEMS.ITRW_CROSSBOW_01 ? { ...ITEMS.ITRW_CROSSBOW_01, ammo: 30 } : null, dex: 50 }); // a guard's light crossbow, 30 bolts
 player.pos.copy(PLAYER_START()); player.heading = Math.PI * 0.75; entities.push(player);
 const wpFix = (name, dy = 0.6) => { const w = WP[name]; return w ? w.clone().add(new THREE.Vector3(0, dy, 0)) : new THREE.Vector3(40, -9, -34); };
 // Arena floor = centre of the OCR_ARENA_01..09 ring. (OCR_ARENABATTLE is the fighters' room *under* the arena.)
@@ -680,7 +705,7 @@ for (const c of dlg.cast) {
   const cfg = castCfg[c.id], look = chars.looks && chars.looks[c.id]; if (!cfg || !look) continue;
   const w = look.weapon || { id: 'sword', twoHanded: false, dmg: 0, dtype: 'blunt', range: 100 };
   const e = new Char({ name: c.name, outfit: look.outfit, head: look.head, tex: look.tex, scale: look.scale, fat: look.fat, ovl: look.overlay,
-    weapon: w.id, twoHanded: w.twoHanded, ranged: look.ranged, cast: c, duty: cfg.duty, guard: !!cfg.guard,
+    weapon: w.id, twoHanded: w.twoHanded, ranged: look.ranged, dex: look.dex || 0, cast: c, duty: cfg.duty, guard: !!cfg.guard,
     hp: look.hp, maxHp: look.hp, str: look.str, wdmg: w.dmg, dtype: w.dtype, reach: reachOf(w.range), prot: look.prot || {}, style: look.style, skill: cfg.skill });
   e.pos.copy(cfg.pos); e.home = cfg.pos.clone(); e.heading = Math.atan2(-(PIT.x - e.pos.x), -(PIT.z - e.pos.z));
   entities.push(e); npcs.push(e);
@@ -705,19 +730,33 @@ function bark(e, name, delay = 0) {
   const now = performance.now() + delay; if (e.barkUntil > now) return; e.barkUntil = now + 2500;
   setTimeout(() => playAt(e.cast.barks[name], at(e, 1.6), 1.2, 9), delay);
 }
-function toggleWeapon(c) {
+const DRAW_CLIP = { melee: 'T_MOVE_2_1HMOVE', bow: 'T_MOVE_2_BOWMOVE', cbow: 'T_MOVE_2_CBOWMOVE' };
+// draw (`mode`: 'melee' by default, or 'ranged') or sheathe what is drawn
+function toggleWeapon(c, mode = 'melee') {
   if (c.drawing || c.downed || (c.act && c.act.type !== 'parade')) return;
-  const draw = !c.drawn, clip = c.clip('T_MOVE_2_1HMOVE');
-  const sw = clip && clip.ev.set_fight_mode ? clip.ev.set_fight_mode[0] / clip.fps : 0.2; // when the hand reaches the hilt
-  c.drawing = { t: 0, draw, at: draw ? sw : (clip.n - 1) / clip.fps - sw, len: (clip.n - 1) / clip.fps };
-  c.overlay('T_MOVE_2_1HMOVE', { rev: !draw });
-  if (draw) c.drawn = true; else playAt('SWORD_UNDRAW_01', at(c), 0.8);
+  const draw = !c.drawn; if (draw) { if (mode === 'ranged' && !c.ranged) return; } else mode = c.mode;
+  const name = DRAW_CLIP[mode === 'ranged' ? c.ranged.kind : 'melee'], clip = c.clip(name);
+  const sw = clip && clip.ev.set_fight_mode ? clip.ev.set_fight_mode[0] / clip.fps : 0.2; // when the hand reaches the weapon
+  const len = clip ? (clip.n - 1) / clip.fps : 0.6;
+  c.drawing = { t: 0, draw, mode, at: draw ? sw : len - sw, len };
+  c.overlay(name, { rev: !draw });
+  if (draw) { c.drawn = true; c.mode = mode; } else if (mode === 'melee') playAt('SWORD_UNDRAW_01', at(c), 0.8);
+}
+// sheathe what is drawn and draw the other weapon
+function switchWeapon(c, mode) {
+  if (c.drawn && c.mode === mode) return;
+  if (!c.drawn) return toggleWeapon(c, mode);
+  c.switchTo = mode; toggleWeapon(c);
 }
 function drawTick(c, dt) {
   const d = c.drawing; if (!d) return;
   d.t += dt;
-  if (!d.switched && d.t >= d.at) { d.switched = true; c.slot(d.draw); if (d.draw) playAt(pick(['SWORD_DRAW_01', 'SWORD_DRAW_02']), at(c), 0.8); else c.drawn = false; }
-  if (d.t >= d.len) c.drawing = null;
+  if (!d.switched && d.t >= d.at) {
+    d.switched = true;
+    if (d.mode === 'ranged') c.rslot(d.draw); else { c.slot(d.draw); if (d.draw) playAt(pick(['SWORD_DRAW_01', 'SWORD_DRAW_02']), at(c), 0.8); }
+    if (!d.draw) c.drawn = false;
+  }
+  if (d.t >= d.len) { c.drawing = null; if (!d.draw && c.switchTo) { const m = c.switchTo; c.switchTo = null; toggleWeapon(c, m); } }
 }
 function aimAt(c) { // Gothic turns the fighter towards the focused enemy when a swing starts
   const t = c.isPlayer ? c.focus : c.hostile; if (!t || t.downed || dist2(c, t) > 3.5) return;
@@ -754,7 +793,7 @@ function attackTick(c, a) {
   }
 }
 function parade(c) {
-  if (c.downed || c.drawing || (c.act && c.act.type !== 'parade')) return;
+  if (c.downed || c.drawing || (c.act && c.act.type !== 'parade') || (c.drawn && c.mode === 'ranged')) return;
   c.play('T_1HPARADE_O', { loop: false, restart: true, blend: 0.06 }); c.act = { type: 'parade', id: ++actId, t: 0 };
 }
 // Gothic's jump: forward from a run/walk (T_RUNL_2_JUMP, then S_JUMP while still in the air), straight up when
@@ -820,7 +859,100 @@ function jumpTick(c, a, dt) {
 }
 function jumpBack(c) {
   if (c.downed || c.drawing || c.act) return;
-  c.play('T_1HPARADEJUMPB', { loop: false, rm: true, restart: true, blend: 0.06 }); c.act = { type: 'jumpb', id: ++actId, t: 0 };
+  const name = c.drawn && c.mode === 'ranged' ? `T_${c.ranged.kind.toUpperCase()}JUMPB` : 'T_1HPARADEJUMPB';
+  c.play(name, { loop: false, rm: true, restart: true, blend: 0.06 }); c.act = { type: 'jumpb', id: ++actId, t: 0 };
+}
+// ---------------------------------------------------------------- bows and crossbows
+// Gothic 1's rules (as OpenGothic implements them): the projectile flies at 30 m/s under gravity, aimed at the
+// target's centre with the arc compensated; the hit chance is 100% up close, the shooter's dexterity % at 20 m and
+// nothing beyond 45 m. A hit does the weapon's damage minus the target's protection against arrows ('point'); a
+// miss is shot off to the side. Shots can't be parried.
+const BULLET_SPEED = 30, BULLET_G = 9.8, REF_RANGE = 20, MAX_RANGE = 45;
+const projectiles = [];
+const hitChance = (dex, d) => d < REF_RANGE ? 1 + (dex / 100 - 1) * (d / REF_RANGE) : d < MAX_RANGE ? (dex / 100) * (1 - (d - REF_RANGE) / (MAX_RANGE - REF_RANGE)) : 0;
+const _ax = new THREE.Vector3(-1, 0, 0); // the ammunition meshes point along their local -x
+function shoot(c) {
+  if (c.downed || c.drawing || !c.drawn || c.mode !== 'ranged' || c.act) return false;
+  if (!(c.ammo > 0)) { if (c.isPlayer) showMsg('No ' + (c.ranged.kind === 'bow' ? 'arrows' : 'bolts') + ' left', 1500); return false; }
+  const K = c.ranged.kind.toUpperCase();
+  c.act = { type: 'shoot', id: ++actId, t: 0, phase: 'raise', K };
+  c.play(`T_${K}RUN_2_${K}AIM`, { loop: false, blend: 0.08 });
+  return true;
+}
+function shootTarget(c) { return c.isPlayer ? (c.focus && c.focus.cast ? c.focus : null) : c.hostile; }
+function shootTick(c, a, dt) {
+  const tgt = shootTarget(c);
+  if (tgt && !tgt.downed && !c.isPlayer) turnTo(c, tgt.pos, dt, 8);
+  if (tgt && !tgt.downed && c.isPlayer && c.focus === lockOn) turnTo(c, tgt.pos, dt, 8);
+  if (a.phase === 'raise' && c.done()) { a.phase = 'aim'; a.t = 0; c.play(`C_${a.K}_5`, { loop: true, blend: 0.05 }); }
+  else if (a.phase === 'aim' && a.t > 0.3) { fire(c, tgt && !tgt.downed ? tgt : null); a.phase = 'shot'; a.t = 0; c.play(`S_${a.K}SHOOT`, { loop: true, blend: 0.03 }); }
+  else if (a.phase === 'shot' && a.t > 0.2) { a.phase = 'reload'; a.t = 0; c.play(`T_${a.K}RELOAD`, { loop: false, blend: 0.08 }); }
+  else if (a.phase === 'reload' && c.done()) c.act = null; // back to the bow / crossbow stance
+}
+function fire(c, tgt) {
+  const r = c.ranged, from = new THREE.Vector3();
+  c.root.updateMatrixWorld(true);
+  c.bones[boneIdx[r.kind === 'bow' ? 'ZS_LEFTHAND' : 'ZS_RIGHTHAND']].getWorldPosition(from);
+  let aim, hit = false;
+  if (tgt) {
+    aim = tgt.pos.clone().add(new THREE.Vector3(0, 1.1, 0));
+    hit = Math.random() < hitChance(c.dex || 0, from.distanceTo(aim));
+    if (!hit) { // a miss: shoot off to one side (and a little high or low) of the target
+      const side = new THREE.Vector3(aim.z - from.z, 0, from.x - aim.x).normalize();
+      aim.addScaledVector(side, pick([-1, 1]) * rand(0.7, 1.4)).add(new THREE.Vector3(0, rand(-0.4, 0.6), 0));
+    }
+  } else aim = from.clone().addScaledVector(c.fwd, 30);
+  const dx = aim.x - from.x, dz = aim.z - from.z, lxz = Math.hypot(dx, dz) || 1, t = lxz / BULLET_SPEED;
+  const vel = new THREE.Vector3(dx / t, (aim.y - from.y) / t + 0.5 * BULLET_G * t, dz / t);
+  const mesh = c.nock.clone(); mesh.visible = true; scene.add(mesh);
+  projectiles.push({ mesh, pos: from.clone(), vel, owner: c, target: tgt, hit, dmg: r.dmg, dtype: r.dtype || 'point', life: 0, stuck: false });
+  c.ammo--; playBuf(whooshBuf, from, c.isPlayer ? 0.6 : 0.5, 6);
+}
+const _seg = new THREE.Line3(), _cp = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3();
+function updateProjectiles(dt) {
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const b = projectiles[i]; b.life += dt;
+    if (b.stuck) { if (b.life > 8) { scene.remove(b.mesh); projectiles.splice(i, 1); } continue; }
+    const prev = b.pos.clone(); b.vel.y -= BULLET_G * dt; b.pos.addScaledVector(b.vel, dt);
+    b.mesh.position.copy(b.pos); b.mesh.quaternion.setFromUnitVectors(_ax, b.vel.clone().normalize());
+    // a person in the way: the segment passes within 0.35 m of their body axis (knee to head)
+    let victim = null;
+    for (const e of entities) {
+      if (e === b.owner || e.downed) continue;
+      _a.set(e.pos.x, e.pos.y + 0.4, e.pos.z); _b.set(e.pos.x, e.pos.y + 1.8, e.pos.z);
+      _seg.set(prev, b.pos); const d = segSegDist(prev, b.pos, _a, _b); if (d < 0.35) { victim = e; break; }
+    }
+    if (victim) {
+      // the aimed-at target only takes damage when the shot's hit roll succeeded; anyone else in the way is hit
+      if (victim !== b.target || b.hit) hurt(victim, b.owner, { dmg: b.dmg, dtype: b.dtype });
+      scene.remove(b.mesh); projectiles.splice(i, 1); continue;
+    }
+    const w = segCast(prev, b.pos);
+    if (w !== null) { b.pos.copy(prev).addScaledVector(b.pos.clone().sub(prev).normalize(), w); b.mesh.position.copy(b.pos); b.stuck = true; b.life = 0; continue; }
+    if (b.life > 4) { scene.remove(b.mesh); projectiles.splice(i, 1); }
+  }
+}
+function segSegDist(p1, q1, p2, q2) { // closest distance between segments p1q1 and p2q2
+  const d1 = q1.clone().sub(p1), d2 = q2.clone().sub(p2), r = p1.clone().sub(p2);
+  const a = d1.dot(d1), e = d2.dot(d2), f = d2.dot(r); let s = 0, t = 0;
+  if (a < 1e-9) { t = clamp(f / e, 0, 1); } else {
+    const c = d1.dot(r), bb = d1.dot(d2), den = a * e - bb * bb;
+    s = den > 1e-9 ? clamp((bb * f - c * e) / den, 0, 1) : 0;
+    t = (bb * s + f) / e;
+    if (t < 0) { t = 0; s = clamp(-c / a, 0, 1); } else if (t > 1) { t = 1; s = clamp((bb - c) / a, 0, 1); }
+  }
+  return p1.clone().addScaledVector(d1, s).distanceTo(p2.clone().addScaledVector(d2, t));
+}
+// the nocked arrow: on the string while drawn and aiming, gone from the shot until the reload places the next one
+function nockTick(c) {
+  if (!c.nock) return;
+  const a = c.act, show = c.drawn && c.mode === 'ranged' && c.ranged.kind === 'bow' && c.ammo > 0 && !c.drawing;
+  let on = show;
+  if (show && a && a.type === 'shoot') {
+    const ev = c.base && c.base.clip.ev.munition_place;
+    on = a.phase === 'raise' || a.phase === 'aim' || (a.phase === 'reload' && ev && c.frame() >= ev[0]);
+  }
+  c.nock.visible = on;
 }
 function strike(att, dir) {
   for (const t of entities) {
@@ -830,20 +962,21 @@ function strike(att, dir) {
     hurt(t, att);
   }
 }
-function hurt(t, att) {
+function hurt(t, att, shot = null) {
   const toA = dirTo(t, att), facing = t.fwd.dot(toA);
-  // parade: blocks a blow from the front while the parry animation is up
-  if (t.act && t.act.type === 'parade' && facing > 0.4 && t.act.t < 0.95) {
+  // parade: blocks a blow from the front while the parry animation is up (not a bolt or an arrow)
+  if (!shot && t.act && t.act.type === 'parade' && facing > 0.4 && t.act.t < 0.95) {
     sfx.clash(t); if (att.act && att.act.type === 'attack') att.act.failed = true; return;
   }
-  const dmg = Math.max(0, att.str + att.wdmg - ((t.prot && t.prot[att.dtype || 'edge']) || 0));
+  const prot = type => (t.prot && t.prot[type]) || 0;
+  const dmg = shot ? Math.max(0, shot.dmg - prot(shot.dtype)) : Math.max(0, att.str + att.wdmg - prot(att.dtype || 'edge'));
   sfx.hit(t);
   if (t.cast && Math.random() < 0.6) bark(t, pick(['AARGH_1', 'AARGH_2', 'AARGH_3'])); else if (t.isPlayer) playAt(pick(['SVM_15_AARGH_1', 'SVM_15_AARGH_2']), at(t, 1.6), 1);
   t.hp -= dmg;
   // humans fighting with melee weapons don't kill each other: at 1 HP they go down unconscious (as in Gothic's arena)
   if (t.hp <= 1) { t.hp = 1; knockDown(t, att); }
   else {
-    t.drawing = null; if (!t.drawn) { t.drawn = true; t.slot(true); }
+    t.drawing = null; if (!t.drawn) { t.drawn = true; t.mode = 'melee'; t.slot(true); }
     t.play(facing < -0.3 ? 'T_STUMBLEB' : 'T_STUMBLE', { loop: false, rm: true, restart: true, blend: 0.05 });
     t.act = { type: 'stumble', id: ++actId, t: 0 };
   }
@@ -878,6 +1011,7 @@ function tickAction(c, dt) {
   if (a.type === 'attack') return attackTick(c, a);
   if (a.type === 'jump') return jumpTick(c, a, dt);
   if (a.type === 'climb') return climbTick(c, a, dt);
+  if (a.type === 'shoot') return shootTick(c, a, dt);
   if (a.type === 'fall') return;
   if (a.type === 'down') {
     if (a.phase === 'fall') { if (!a.snd && c.frame() > 44) { a.snd = true; sfx.fall(c); } if (c.done()) { a.phase = 'lie'; a.t = 0; c.play('S_WOUNDED', { blend: 0.3 }); } }
@@ -964,8 +1098,9 @@ function acquireLock() {
 }
 function actionInput(dir) {
   const p = player; if (p.downed) return;
-  if (!p.drawn && !p.drawing) { if (!convo) toggleWeapon(p); return; }
+  if (!p.drawn && !p.drawing) { if (!convo) toggleWeapon(p, p.lastMode || 'melee'); return; }
   if (p.drawing) return;
+  if (p.mode === 'ranged') { if (dir === 'F') shoot(p); return; } // aim + shoot; the other directions do nothing
   if (dir === 'B') return parade(p);
   const a = p.act;
   if (a && a.type === 'attack') { const f = p.frame(), [ws, we] = winOf(a); if (f < ws) a.failed = true; else if (f <= we + 0.5) a.queued = dir; return; }
@@ -1000,6 +1135,8 @@ function setStyle(s) { player.style = s; store.set('style', s); $('style').textC
 setStyle(player.style in STYLE_NAMES ? player.style : '');
 function restartArena() {
   if (convo) closeConvo(); lockOn = null;
+  for (const b of projectiles) scene.remove(b.mesh); projectiles.length = 0;
+  for (const c of entities) if (c.ranged) { c.ammo = c.ammo0; c.rslot(false); c.mode = 'melee'; c.switchTo = null; }
   for (const d of doors) { d.state = 'shut'; d.grp.matrix.fromArray(d.open[0]); }
   for (const c of entities) {
     Object.assign(c, { downed: false, act: null, drawing: null, hostile: null, vy: 0, air: false, fallT: 0, hp: c.maxHp, over: null, lookT: 0, warn: 0, weapT: 0 });
@@ -1126,7 +1263,13 @@ function onKey(e) {
     else if (ACTION_DIRS[e.code] && actionHeld() && (p.drawn || p.drawing) && !p.downed && !(keys.Space && 'LR'.includes(ACTION_DIRS[e.code])))
       actionInput(ACTION_DIRS[e.code]); // action + direction (with Space, A/D strafe instead of swinging)
   } else if (e.code === 'KeyE' && !p.downed && !p.drawn) interact();
-  if ((modern ? e.code === 'ControlLeft' || e.code === 'ControlRight' : e.code === 'Space' || e.code === 'KeyF') && !p.downed) toggleWeapon(p);
+  if ((modern ? e.code === 'ControlLeft' || e.code === 'ControlRight' : e.code === 'Space' || e.code === 'KeyF') && !p.downed) toggleWeapon(p, p.lastMode || 'melee');
+  // Gothic's weapon keys: 1 = melee weapon, 2 = bow / crossbow (pressing the drawn one's key sheathes it)
+  if ((e.code === 'Digit1' || e.code === 'Digit2') && !p.downed) {
+    const m = e.code === 'Digit1' ? 'melee' : 'ranged';
+    if (m === 'ranged' && !p.ranged) flash('No bow or crossbow');
+    else { p.lastMode = m; if (p.drawn && p.mode === m) toggleWeapon(p); else switchWeapon(p, m); }
+  }
   if (modern && e.code === 'Space') {
     // Space + S jumps back with the weapon drawn (otherwise you just walk back); Space + A/D strafe (see
     // playerInput); Space alone jumps (or climbs), except while focusing. The direction may come a moment after
@@ -1164,15 +1307,16 @@ function playerInput(dt) {
   else if (!modern && p.drawn && !p.drawing && p.mv.f < 0) { p.mv.f = 0; if (!p.act) jumpBack(p); } // modern: Space + S jumps back
   else if (modern && back && k.Space && p.drawn) p.mv.f = 0; // armed: Space + S jumps back (on the key press); unarmed: walk back
   // locked focus (modern scheme): keep facing the target; A/D then circle around it
-  if (lockOn && (lockOn.downed || dist2(p, lockOn) > LOCK_RANGE)) lockOn = null;
+  if (lockOn && (lockOn.downed || dist2(p, lockOn) > (p.drawn && p.mode === 'ranged' ? MAX_RANGE : LOCK_RANGE))) lockOn = null;
   if (actionHeld() && !lockOn) acquireLock(); // still holding: take the next target that comes into view
   p.focusDoor = null;
   if (lockOn) { if (!p.act || p.act.type === 'parade') turnTo(p, lockOn.pos, dt, 9); p.focus = lockOn; return; }
   // focus: the NPC the hero is looking at
   let best = null, bs = 1e9;
   for (const n of npcs) {
-    if (n.downed) continue; const d = dist2(p, n); if (d > (p.drawn ? 10 : 7)) continue;
-    const dot = p.fwd.dot(dirTo(p, n)); if (dot < 0.6) continue;
+    const rng = p.drawn && p.mode === 'ranged';
+    if (n.downed) continue; const d = dist2(p, n); if (d > (rng ? MAX_RANGE : p.drawn ? 10 : 7)) continue;
+    const dot = p.fwd.dot(dirTo(p, n)); if (dot < (rng ? 0.9 : 0.6)) continue;
     const s = d * (2.2 - dot); if (s < bs) { bs = s; best = n; }
   }
   p.focus = best;
@@ -1211,7 +1355,19 @@ function perceive(n, dt) {
 function fight(n, tgt, dt) {
   const d = dist2(n, tgt);
   n.idlePose = null; n.gait = 'run';
-  if (!n.drawn && !n.drawing) toggleWeapon(n);
+  if (n.ranged && !n.drawing && !n.act) {
+    const sees = segCast(n.pos.clone().setY(n.pos.y + 1.5), tgt.pos.clone().setY(tgt.pos.y + 1.3)) === null;
+    const want = n.ammo > 0 && sees && d > 7 ? 'ranged' : d < 4.5 || !(n.ammo > 0) || !sees ? 'melee' : n.drawn ? n.mode : 'melee';
+    if (!n.drawn || n.mode !== want) { switchWeapon(n, want); return; }
+  }
+  if (n.drawn && n.mode === 'ranged') {
+    if (n.drawing || n.act) return;
+    turnTo(n, tgt.pos, dt, 6);
+    n.shotCd = (n.shotCd || rand(0.3, 0.8)) - dt;
+    if (n.shotCd <= 0 && n.fwd.dot(dirTo(n, tgt)) > 0.95) { shoot(n); n.shotCd = rand(0.8, 1.8) * (1.4 - n.skill); }
+    return;
+  }
+  if (!n.drawn && !n.drawing) toggleWeapon(n, 'melee');
   if (n.act) return; // attack/parade/jump in progress (combos are decided in attackTick)
   turnTo(n, tgt.pos, dt, 7);
   if (n.drawing) { if (d > 2) n.mv.f = 1; return; }
@@ -1500,7 +1656,9 @@ function updateHud() {
   $('ehp').style.display = foe ? 'block' : 'none';
   if (foe) { setText($('ehpn'), foe.name); $('ehpf').style.width = Math.max(0, (100 * foe.hp) / foe.maxHp) + '%'; }
   $('hpf').style.width = Math.max(0, (100 * p.hp) / p.maxHp) + '%';
-  setText($('gait'), sneakOn ? 'sneaking' : walkOn !== !!(keys.ShiftLeft || keys.ShiftRight) ? 'walking' : '');
+  const gaitTxt = sneakOn ? 'sneaking' : walkOn !== !!(keys.ShiftLeft || keys.ShiftRight) ? 'walking' : '';
+  const ammoTxt = p.ranged && p.drawn && p.mode === 'ranged' ? (p.ranged.kind === 'bow' ? 'Arrows ' : 'Bolts ') + p.ammo : '';
+  setText($('gait'), [ammoTxt, gaitTxt].filter(Boolean).join('  ·  '));
 }
 
 // ---------------------------------------------------------------- main loop
@@ -1526,7 +1684,8 @@ function frame() {
   playerInput(dt);
   for (const n of npcs) n.hl = n === player.focus && !convo;
   for (const d of doors) d.hl = d === player.focusDoor && !convo;
-  updateDoors(dt);
+  updateDoors(dt); updateProjectiles(dt);
+  for (const c of entities) nockTick(c);
   if (convo) { player.mv.f = player.mv.s = 0; turnTo(player, convo.npc.pos, dt); }
   const ai = !window.__freezeAI;
   if (ai) for (const n of npcs) aiStep(n, dt);
@@ -1560,7 +1719,7 @@ function frame() {
   requestAnimationFrame(frame);
 }
 window.__game = {
-  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, story, openMenu, get convo() { return convo; }, barrierState: { flashes, bolts, barrier }, doors, useDoor, setWeather, wx, barrierFlash, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
+  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, shoot, switchWeapon, projectiles, hitChance, story, openMenu, get convo() { return convo; }, barrierState: { flashes, bolts, barrier }, doors, useDoor, setWeather, wx, barrierFlash, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
   get yaw() { return player.heading; }, set yaw(v) { player.heading = v; }, set pitch(v) { pitch = v; },
   set sneak(v) { sneakOn = v; },
 };

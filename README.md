@@ -66,6 +66,8 @@ The mouse turns the hero in both.
 | jump; facing a ledge: climb up | Space | Alt or V |
 | sneak on/off | X | C |
 | draw / sheathe weapon | Ctrl | Space or F |
+| melee weapon / bow or crossbow | 1 / 2 (again: sheathe) | 1 / 2 |
+| shoot (bow / crossbow drawn) | action + W, at the target in focus | left click |
 | action key | left mouse or E | – |
 | focus lock on the target in front | hold the action key | – |
 | attack forward / left / right | action + W / A / D | left click / A or D + left click |
