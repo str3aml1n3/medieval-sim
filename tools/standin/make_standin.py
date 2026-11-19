@@ -617,6 +617,7 @@ def build_chars():
         looks[cid] = {'instance': 'STANDIN_' + cid, 'outfit': out, 'head': hd, 'tex': {}, 'scale': [1, 1, 1], 'fat': 0, 'overlay': None,
                       'weapon': {'id': wid, 'name': wid, 'twoHanded': two, 'dmg': dmg, 'dtype': dtype, 'range': 150 if two else 100},
                       'ranged': None, 'style': style, 'hp': hp, 'str': st, 'prot': {'edge': prot, 'blunt': prot} if prot else {}}
+    looks['HERO'] = {'instance': 'STANDIN_HERO', 'outfit': 'GRDM', 'head': 'PONY', 'tex': {}}  # the player: ponytail
     items = {'GRD_ARMOR_M': {'prot': {'edge': 55, 'blunt': 55}}, 'ITMW_1H_SWORD_01': {'dmg': 20, 'dtype': 'edge', 'range': 100}}
     save_json('chars.json', {'bones': bones, 'outfits': outfits, 'heads': heads, 'weapons': {}, 'weaponsLocal': weapons, 'items': items, 'looks': looks})
     # the same authored story as with Gothic (dialogue/arena.json); {ID} tokens become these stand-in names in game

@@ -650,7 +650,9 @@ const PLAYER_SWORD = ITEMS.ITMW_1H_SWORD_01 || { dmg: 20, dtype: 'edge', range: 
 const reachOf = range => 1.1 + (range || 100) / 100; // centre-to-centre: two bodies plus the weapon's range (cm)
 const entities = [];
 const PLAYER_START = () => (WP.OCR_OUTSIDE_ARENA || new THREE.Vector3(49.7, -9.5, -42.4)).clone().add(new THREE.Vector3(0, 0.5, 0));
-const player = new Char({ name: 'You', outfit: 'GRDM', head: 'FIGHTER', weapon: 'sword', isPlayer: true, hp: 220, maxHp: 220, str: 70,
+// the hero: Gothic's own head, face and skin (PC_HERO: the ponytail), in guard armour with a sword
+const HERO_LOOK = (chars.looks && chars.looks.HERO) || { head: 'PONY', tex: {} };
+const player = new Char({ name: 'You', outfit: 'GRDM', head: chars.heads[HERO_LOOK.head] ? HERO_LOOK.head : 'FIGHTER', tex: HERO_LOOK.tex, weapon: 'sword', isPlayer: true, hp: 220, maxHp: 220, str: 70,
   wdmg: PLAYER_SWORD.dmg, dtype: PLAYER_SWORD.dtype, reach: reachOf(PLAYER_SWORD.range), prot: PLAYER_ARMOR, style: store.get('style', '') });
 player.pos.copy(PLAYER_START()); player.heading = Math.PI * 0.75; entities.push(player);
 const wpFix = (name, dy = 0.6) => { const w = WP[name]; return w ? w.clone().add(new THREE.Vector3(0, dy, 0)) : new THREE.Vector3(40, -9, -34); };
