@@ -1028,7 +1028,19 @@ function tickAction(c, dt) {
 // ---------------------------------------------------------------- input
 const keys = {}; let pitch = 0.22, lockedUI = false, sneakOn = false, rmb = false;
 let spaceT = 0; const SPACE_WINDOW = 120; // ms: Space and a direction pressed this close together are a combination
-let walkOn = false; // Tab switches between running and walking for good; Shift switches only while held
+let walkOn = false;
+// modern scheme: Space and the right mouse button are the same key. Held + A/D: strafe; held + S: parry (weapon
+// drawn; unarmed you just walk back) - both in playerInput. Pressed alone: jump (or climb), except while focusing.
+// A direction may come a moment after the press, so the decision waits a short window.
+const modHeld = () => !!keys.Space || rmb;
+function modPress() {
+  clearTimeout(spaceT);
+  spaceT = setTimeout(() => {
+    const p = player; if (convo || paused || p.downed) return;
+    const sideKey = keys.KeyA || keys.KeyD || keys.ArrowLeft || keys.ArrowRight;
+    if (!sideKey && !(keys.KeyS || keys.ArrowDown) && !actionHeld()) jump(p);
+  }, SPACE_WINDOW);
+} // Tab switches between running and walking for good; Shift switches only while held
 // two control schemes: 'gothic' (the original's keys) and 'modern' (Space jumps, Ctrl draws, X sneaks, R looks back,
 // right mouse locks the focus on an enemy). Picked in the pause menu, remembered per browser.
 let scheme = store.get('controls', 'modern') === 'gothic' ? 'gothic' : 'modern'; // modern is the default ('controls' replaces an older key that always stored 'gothic')
@@ -1062,7 +1074,7 @@ addEventListener('mousedown', e => {
   if (!document.pointerLockElement || lockedUI || paused) return;
   // Gothic scheme: left = attack. Modern: left = lock focus on a target (E is the action key there). Right = parry in both.
   if (e.button === 0) { if (scheme === 'modern') { lmb = true; actionPress(); } else actionInput(dirKeys()); }
-  if (e.button === 2) { rmb = true; if (player.drawn && (scheme === 'gothic' || keys.KeyS || keys.ArrowDown)) parade(player); }
+  if (e.button === 2) { rmb = true; if (scheme === 'modern') modPress(); else if (player.drawn) parade(player); } // modern: same as Space
 });
 addEventListener('mouseup', e => { if (e.button === 2) rmb = false; if (e.button === 0) { lmb = false; actionRelease(); } });
 addEventListener('contextmenu', e => e.preventDefault());
@@ -1275,17 +1287,8 @@ function onKey(e) {
     if (m === 'ranged' && !p.ranged) flash('No bow or crossbow');
     else { p.lastMode = m; if (p.drawn && p.mode === m) toggleWeapon(p); else switchWeapon(p, m); }
   }
-  if (modern && e.code === 'Space') {
-    // Space + S parries with the weapon drawn (otherwise you just walk back) and Space + A/D strafe (both in
-    // playerInput); Space alone jumps (or climbs), except while focusing. The direction may come a moment after
-    // Space, so the decision waits a short window.
-    clearTimeout(spaceT);
-    spaceT = setTimeout(() => {
-      if (convo || paused || p.downed) return;
-      const sideKey = keys.KeyA || keys.KeyD || keys.ArrowLeft || keys.ArrowRight;
-      if (!sideKey && !(keys.KeyS || keys.ArrowDown) && !actionHeld()) jump(p); // with A/D, or while focusing, Space is the strafe modifier
-    }, SPACE_WINDOW);
-  } else if (!modern && (e.code === 'AltLeft' || e.code === 'AltRight' || e.code === 'KeyV')) jump(p);
+  if (modern && e.code === 'Space') modPress();
+  else if (!modern && (e.code === 'AltLeft' || e.code === 'AltRight' || e.code === 'KeyV')) jump(p);
   if (e.code === 'Tab') { walkOn = !walkOn; flash(walkOn ? 'Walking' : 'Running'); }
   if ((modern ? e.code === 'KeyX' : e.code === 'KeyC') || e.code === 'NumpadMultiply') { sneakOn = !sneakOn; flash(sneakOn ? 'Sneaking' : 'Running'); }
   if (e.code === 'KeyT') { const order = ['', '1HST1', '1HST2']; setStyle(order[(order.indexOf(p.style) + 1) % 3]); flash('One-handed: ' + STYLE_NAMES[p.style]); }
@@ -1300,13 +1303,14 @@ function playerInput(dt) {
   p.mv.f = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0);
   const side = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
   p.gait = sneakOn ? 'sneak' : walkOn !== !!(k.ShiftLeft || k.ShiftRight) ? 'walk' : 'run';
-  const modern = scheme === 'modern', back = k.KeyS || k.ArrowDown, strafeMod = rmb || k.Space; // right mouse or Space held + A/D: strafe (focused or not, armed or not)
+  const modern = scheme === 'modern', back = k.KeyS || k.ArrowDown, strafeMod = modHeld(); // Space / right mouse held + A/D: strafe (focused or not, armed or not)
   // modern: A/D turn on the spot (armed or not); with the right mouse button or Space held they strafe,
   // and right mouse + S parries. Gothic scheme: A/D strafe, right mouse parries.
   if (!modern || strafeMod) p.mv.s = side;
   else if (side && !(p.drawn && actionHeld())) { p.heading -= side * TURN_RATE * dt; p.mv.turn = side; }
   if (p.drawn && actionHeld()) { p.mv.f = 0; if (!k.Space) p.mv.s = 0; } // holding the action key: the direction keys fight, not walk (Space + A/D still strafe)
-  const parry = p.drawn && (modern ? (rmb || k.Space) && back : rmb); // modern: right mouse or Space + S parry
+  // modern: Space / right mouse + S parries (held). Gothic scheme: right mouse parries.
+  const parry = p.drawn && (modern ? modHeld() && back : rmb);
   if (parry) { p.mv.f = 0; if (!p.drawing && !p.act) parade(p); }
   else if (!modern && p.drawn && !p.drawing && p.mv.f < 0) { p.mv.f = 0; if (!p.act) jumpBack(p); } // (Gothic scheme: S jumps back)
   // locked focus (modern scheme): keep facing the target; A/D then circle around it

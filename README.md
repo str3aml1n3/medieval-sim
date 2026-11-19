@@ -63,7 +63,7 @@ The mouse turns the hero in both.
 | turn on the spot | A / D | – (mouse) |
 | strafe | right mouse or Space (hold) + A / D | A / D |
 | walk / run | Tab switches for good, Shift while held | same |
-| jump; facing a ledge: climb up | Space | Alt or V |
+| jump; facing a ledge: climb up | Space or right mouse (the same key) | Alt or V |
 | sneak on/off | X | C |
 | draw / sheathe weapon | Ctrl | Space or F |
 | melee weapon / bow or crossbow | 1 / 2 (again: sheathe) | 1 / 2 |
@@ -72,7 +72,7 @@ The mouse turns the hero in both.
 | focus lock on the target in front | hold the action key | – |
 | attack forward / left / right | action + W / A / D | left click / A or D + left click |
 | chain a combo | repeat as the swing ends (too early breaks it) | same |
-| parry | right mouse or Space + S, or action + S | right click, or S + left click |
+| parry | Space / right mouse + S, or action + S | right click, or S + left click |
 | jump back (weapon drawn) | – | S |
 | talk / open a door / sit down | action key (weapon sheathed) | E |
 | stand up | any movement, or the action key | any movement, or E |
