@@ -74,7 +74,8 @@ The mouse turns the hero in both.
 | chain a combo | repeat as the swing ends (too early breaks it) | same |
 | parry | right mouse + S, or action + S | right click, or S + left click |
 | jump back (weapon drawn) | Space + S | S |
-| talk | action key (weapon sheathed) | E |
+| talk / open a door / sit down | action key (weapon sheathed) | E |
+| stand up | any movement, or the action key | any movement, or E |
 | pick a dialogue option | mouse wheel + left click, ↑/↓ + Enter, or 1–7 | same |
 | skip the line being spoken | right click | right click |
 | look back | R (hold) | – |

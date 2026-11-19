@@ -61,8 +61,9 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 32, 16), new THREE.Shad
 }));
 sky.renderOrder = -1; scene.add(sky);
 // the sun (UNSUN5: additive, black background) in the direction of the sun light
-const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: skyTex('UNSUN5'), blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false, transparent: true }));
-sunSprite.position.copy(SUN_DIR).multiplyScalar(380); sunSprite.scale.set(90, 90, 1); sunSprite.renderOrder = -1; sky.add(sunSprite);
+// drawn with the sky (opaque pass, before the world), so roofs and walls hide it instead of it shining through them
+const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: skyTex('UNSUN5'), color: 0xffdca0, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false, transparent: false }));
+sunSprite.position.copy(SUN_DIR).multiplyScalar(380); sunSprite.scale.set(70, 70, 1); sunSprite.renderOrder = -0.95; sky.add(sunSprite);
 
 // ---------------------------------------------------------------- loading
 const jget = u => fetch(E + u).then(r => { if (!r.ok) throw new Error(u); return r.json(); });
@@ -963,6 +964,7 @@ function strike(att, dir) {
   }
 }
 function hurt(t, att, shot = null) {
+  if (t.act && t.act.type === 'sit') t.act.slot.taken = null; // hit while seated: the seat is free again
   const toA = dirTo(t, att), facing = t.fwd.dot(toA);
   // parade: blocks a blow from the front while the parry animation is up (not a bolt or an arrow)
   if (!shot && t.act && t.act.type === 'parade' && facing > 0.4 && t.act.t < 0.95) {
@@ -1011,6 +1013,7 @@ function tickAction(c, dt) {
   if (a.type === 'attack') return attackTick(c, a);
   if (a.type === 'jump') return jumpTick(c, a, dt);
   if (a.type === 'climb') return climbTick(c, a, dt);
+  if (a.type === 'sit') return sitTick(c, a, dt);
   if (a.type === 'shoot') return shootTick(c, a, dt);
   if (a.type === 'fall') return;
   if (a.type === 'down') {
@@ -1051,7 +1054,7 @@ addEventListener('mousemove', e => {
   if (!document.pointerLockElement || lockedUI || paused) return;
   const mx = e.movementX, my = e.movementY;
   if (Math.abs(mx) > 300 || Math.abs(my) > 300) return; // Chrome on Windows sometimes reports huge bogus jumps under pointer lock
-  if (!player.downed && !lockOn) player.heading -= mx * 0.0022 * sens; // locked on: the hero keeps facing the target
+  if (!player.downed && !lockOn && !isSeated(player)) player.heading -= mx * 0.0022 * sens; // locked on / seated: no turning
   pitch = clamp(pitch + my * 0.0016 * sens, -0.35, 1.1);
 });
 const dirKeys = () => (keys.KeyA || keys.ArrowLeft ? 'L' : keys.KeyD || keys.ArrowRight ? 'R' : keys.KeyS || keys.ArrowDown ? 'B' : 'F');
@@ -1081,7 +1084,8 @@ function actionPress() {
 function interact() {
   const p = player, n = p.focus && !p.focus.hostile && !p.focus.downed && dist2(p, p.focus) < 3.2 ? p.focus : null;
   if (n) return openMenu(n);
-  if (p.focusDoor) return useDoor(p.focusDoor);
+  if (isSeated(p)) return standUp(p);
+  if (p.focusDoor) return p.focusDoor.slots === undefined && p.focusDoor.kind ? sit(p, p.focusDoor) : useDoor(p.focusDoor);
   const t = nearestTalker(); if (t) openMenu(t);
 }
 function actionRelease() { if (!actionHeld()) lockOn = null; }
@@ -1135,6 +1139,7 @@ function setStyle(s) { player.style = s; store.set('style', s); $('style').textC
 setStyle(player.style in STYLE_NAMES ? player.style : '');
 function restartArena() {
   if (convo) closeConvo(); lockOn = null;
+  for (const sl of seatSlots) sl.taken = null;
   for (const b of projectiles) scene.remove(b.mesh); projectiles.length = 0;
   for (const c of entities) if (c.ranged) { c.ammo = c.ammo0; c.rslot(false); c.mode = 'melee'; c.switchTo = null; }
   for (const d of doors) { d.state = 'shut'; d.grp.matrix.fromArray(d.open[0]); }
@@ -1310,6 +1315,7 @@ function playerInput(dt) {
   if (lockOn && (lockOn.downed || dist2(p, lockOn) > (p.drawn && p.mode === 'ranged' ? MAX_RANGE : LOCK_RANGE))) lockOn = null;
   if (actionHeld() && !lockOn) acquireLock(); // still holding: take the next target that comes into view
   p.focusDoor = null;
+  if (isSeated(p)) { p.mv.f = p.mv.s = 0; p.mv.turn = 0; if (k.KeyW || k.KeyS || k.KeyA || k.KeyD || k.Space) standUp(p); return; }
   if (lockOn) { if (!p.act || p.act.type === 'parade') turnTo(p, lockOn.pos, dt, 9); p.focus = lockOn; return; }
   // focus: the NPC the hero is looking at
   let best = null, bs = 1e9;
@@ -1326,6 +1332,14 @@ function playerInput(dt) {
       const dd = Math.hypot(d.pos.x - p.pos.x, d.pos.z - p.pos.z); if (dd > bd || Math.abs(d.pos.y - p.pos.y) > 1.5) continue;
       const to = new THREE.Vector3(d.pos.x - p.pos.x, 0, d.pos.z - p.pos.z).normalize(); if (p.fwd.dot(to) < 0.5) continue;
       bd = dd; p.focusDoor = d;
+    }
+    if (!p.focusDoor) { // a free seat close in front
+      let bs = 1.4;
+      for (const sl of seatSlots) {
+        if (sl.taken) continue; const dd = Math.hypot(sl.p.x - p.pos.x, sl.p.z - p.pos.z); if (dd > bs || Math.abs(sl.p.y - p.pos.y) > 0.8) continue;
+        const to = new THREE.Vector3(sl.p.x - p.pos.x, 0, sl.p.z - p.pos.z); if (dd > 0.4 && p.fwd.dot(to.normalize()) < 0.5) continue;
+        bs = dd; p.focusDoor = sl;
+      }
     }
   }
 }
@@ -1388,11 +1402,15 @@ function aiStep(n, dt) {
   n.mv.f = 0; n.mv.s = 0; n.gait = 'run';
   if (n.downed) return;
   if (convo && convo.npc === n) {
-    n.idlePose = null; turnTo(n, player.pos, dt);
+    n.idlePose = null; if (!isSeated(n)) turnTo(n, player.pos, dt);
     n.gestT = (n.gestT || 0) - dt; if (n.talking && n.gestT < 0 && GESTURES.length) { n.overlay(pick(GESTURES)); n.gestT = rand(2.5, 4.5); }
     return;
   }
   if (n.hostile && n.hostile.downed) n.hostile = null;
+  if (isSeated(n)) {
+    if (n.hostile || (n.sitT -= dt) < 0) standUp(n);
+    return; // (a seated NPC talks from his seat, without turning)
+  }
   if (n.hostile) return fight(n, n.hostile, dt);
   if (n.drawn && !n.drawing && !n.act) { n.calmT = (n.calmT || 0) + dt; if (n.calmT > 1.5) { toggleWeapon(n); n.calmT = 0; } }
   if (n.act) return;
@@ -1410,7 +1428,16 @@ function aiStep(n, dt) {
   } else if (n.duty === 'guard') { if (turnTo(n, PIT, dt, 3) < 0.3) n.idlePose = 'guard'; }
   else if (n.duty === 'idle') {
     n.idlePose = null; n.wt = (n.wt || 0) - dt;
-    if (n.wt < 0) { n.wt = rand(4, 9); n.wander = n.home.clone().add(new THREE.Vector3(rand(-3, 3), 0, rand(-3, 3))); }
+    if (n.wt < 0) {
+      n.wt = rand(4, 9); n.seatGoal = null;
+      // now and then: sit down on a free seat near home for a while
+      const free = Math.random() < 0.5 && seatSlots.filter(sl => !sl.taken && sl.p.distanceTo(n.home) < 7);
+      if (free && free.length) { n.seatGoal = pick(free); n.wander = n.seatGoal.p.clone(); }
+      else n.wander = n.home.clone().add(new THREE.Vector3(rand(-3, 3), 0, rand(-3, 3)));
+    }
+    if (n.seatGoal && !n.seatGoal.taken && Math.hypot(n.seatGoal.p.x - n.pos.x, n.seatGoal.p.z - n.pos.z) < 0.45) {
+      if (sit(n, n.seatGoal)) n.sitT = rand(20, 40); n.seatGoal = null; return;
+    }
     if (n.wander && Math.hypot(n.wander.x - n.pos.x, n.wander.z - n.pos.z) > 0.4) { n.gait = 'walk'; if (turnTo(n, n.wander, dt, 4) < 0.5) n.mv.f = 1; }
   }
 }
@@ -1638,9 +1665,119 @@ const flames = [];
 for (const L of world.lights || []) {
   const col = new THREE.Color(L.c[0] / 255, L.c[1] / 255, L.c[2] / 255);
   const pl = new THREE.PointLight(col, 8, Math.min(L.r, 15), 1.5); pl.position.set(...L.p); scene.add(pl);
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: true }));
-  s.position.copy(pl.position); s.scale.set(1.4, 1.4, 1); scene.add(s);
-  flames.push({ pl, s, flicker: L.flicker, ph: Math.random() * 10 });
+  flames.push({ pl, flicker: L.flicker, ph: Math.random() * 10 });
+}
+
+// ---------------------------------------------------------------- particle effects (Gothic .PFX: fires, smoke, torches, embers)
+// Each effect's settings come from Gothic's PARTICLEFX.DAT (export_world.py): emission rate, lifetime, emitter shape,
+// direction and speed, gravity, size growth, colour and alpha over life, additive or blended. Emitters within
+// PFX_RANGE of the camera run; particles are camera-facing points sized in world units.
+const PFX_RANGE = 45, PFX_MAX_EMITTERS = 48;
+const pfxSystems = [];
+const pfxVert = `attribute float size; attribute vec4 pcolor; varying vec4 vColor; uniform float scale;
+  void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; gl_PointSize = size * scale / max(0.1, -mv.z); vColor = pcolor; }`;
+const pfxFrag = (add) => `uniform sampler2D map; varying vec4 vColor;
+  void main(){ vec4 t = texture2D(map, gl_PointCoord); float a = t.a * vColor.a; if (a < 0.01) discard;
+    gl_FragColor = ${add ? 'vec4(t.rgb * vColor.rgb * a, 1.0)' : 'vec4(t.rgb * vColor.rgb, a)'}; }`;
+for (const [name, d] of Object.entries(world.pfxDefs || {})) {
+  const emitters = (world.pfx || []).filter(e => e.n === name).map(e => ({ p: new THREE.Vector3(...e.p), acc: Math.random() }));
+  if (!emitters.length) continue;
+  const perEmitter = Math.ceil(d.pps * (d.life + d.lifeVar) * 1.15) + 2, cap = perEmitter * Math.min(emitters.length, PFX_MAX_EMITTERS);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(cap * 3), 3));
+  g.setAttribute('size', new THREE.BufferAttribute(new Float32Array(cap), 1));
+  g.setAttribute('pcolor', new THREE.BufferAttribute(new Float32Array(cap * 4), 4));
+  const add = d.blend === 'ADD';
+  const mat = new THREE.ShaderMaterial({ uniforms: { map: { value: getTex(d.tex) }, scale: { value: 1 } }, vertexShader: pfxVert, fragmentShader: pfxFrag(add),
+    transparent: true, depthWrite: false, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending });
+  const pts = new THREE.Points(g, mat); pts.frustumCulled = false; pts.renderOrder = 2; scene.add(pts);
+  pfxSystems.push({ d, emitters, cap, g, mat, parts: [] });
+}
+const _rv = new THREE.Vector3();
+function pfxSpawn(sys, e) {
+  const d = sys.d, r = d.dim;
+  if (d.shape === 'SPHERE') { _rv.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)); if (_rv.lengthSq() > 1) _rv.normalize(); _rv.multiplyScalar(d.volume ? r : r * 0.9); }
+  else if (d.shape === 'CIRCLE') { const a = rand(0, Math.PI * 2), k = d.volume ? Math.sqrt(Math.random()) : 1; _rv.set(Math.cos(a) * r * k, 0, Math.sin(a) * r * k); }
+  else _rv.set(0, 0, 0);
+  const pos = e.p.clone().add(_rv).add(new THREE.Vector3(...d.offset));
+  let dir;
+  if (d.dirMode === 'RAND') dir = new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize();
+  else {
+    const el = THREE.MathUtils.degToRad(d.elev + rand(-1, 1) * d.elevVar), hd = THREE.MathUtils.degToRad(rand(-1, 1) * d.headVar);
+    dir = new THREE.Vector3(Math.cos(el) * Math.cos(hd), Math.sin(el), Math.cos(el) * Math.sin(hd));
+  }
+  const life = Math.max(0.05, d.life + rand(-1, 1) * d.lifeVar);
+  sys.parts.push({ pos, vel: dir.multiplyScalar(d.vel + rand(-1, 1) * d.velVar), age: 0, life });
+}
+function updatePfx(dt) {
+  const scale = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+  for (const sys of pfxSystems) {
+    const d = sys.d, grav = new THREE.Vector3(...d.gravity);
+    // emit from the nearest emitters only
+    const near = sys.emitters.filter(e => e.p.distanceToSquared(camera.position) < PFX_RANGE * PFX_RANGE);
+    near.sort((a, b) => a.p.distanceToSquared(camera.position) - b.p.distanceToSquared(camera.position));
+    for (const e of near.slice(0, PFX_MAX_EMITTERS)) { e.acc += d.pps * dt; while (e.acc >= 1 && sys.parts.length < sys.cap) { e.acc -= 1; pfxSpawn(sys, e); } }
+    const P = sys.g.attributes.position.array, S = sys.g.attributes.size.array, C = sys.g.attributes.pcolor.array;
+    let n = 0;
+    for (let i = sys.parts.length - 1; i >= 0; i--) {
+      const q = sys.parts[i]; q.age += dt;
+      if (q.age >= q.life) { sys.parts[i] = sys.parts[sys.parts.length - 1]; sys.parts.pop(); continue; }
+      q.vel.addScaledVector(grav, dt); q.pos.addScaledVector(q.vel, dt);
+      const t = q.age / q.life, [c0, c1] = d.color;
+      P[n * 3] = q.pos.x; P[n * 3 + 1] = q.pos.y; P[n * 3 + 2] = q.pos.z;
+      S[n] = d.size[0] * (1 + (d.sizeEnd - 1) * t);
+      C[n * 4] = c0[0] + (c1[0] - c0[0]) * t; C[n * 4 + 1] = c0[1] + (c1[1] - c0[1]) * t; C[n * 4 + 2] = c0[2] + (c1[2] - c0[2]) * t;
+      C[n * 4 + 3] = (d.alpha[0] + (d.alpha[1] - d.alpha[0]) * t) * SKY_DIM_FX();
+      n++;
+    }
+    sys.g.setDrawRange(0, n);
+    for (const k of ['position', 'size', 'pcolor']) sys.g.attributes[k].needsUpdate = true;
+    sys.mat.uniforms.scale.value = scale;
+  }
+}
+const SKY_DIM_FX = () => 1; // (hook: flames are self-lit, so the weather doesn't dim them)
+
+// ---------------------------------------------------------------- seats (chairs, benches, thrones)
+// Gothic's mob seats: each slot (ZS_POS* node) is where the sitter stands and which way he faces. Sitting plays the
+// human model's own clips: T_x_STAND_2_S0 -> T_x_S0_2_S1 -> S_x_S1 (seated); standing up plays them backwards.
+// Their root carries the step back onto the seat, so it is drawn (base.kz) instead of moving the character.
+const seatSlots = [];
+for (const st of world.seats || []) for (const sl of st.slots) {
+  const dir = new THREE.Vector2(sl.dir[0], sl.dir[1]);
+  seatSlots.push({ kind: st.kind, name: st.kind === 'CHAIR' ? 'Chair' : st.kind === 'BENCH' ? 'Bench' : 'Throne', p: new THREE.Vector3(...sl.p),
+    heading: Math.atan2(-dir.x, -dir.y), taken: null });
+}
+seatSlots.forEach(sl => (sl.pos = sl.p)); // the focus tag floats above .pos, like an NPC's
+function sitClip(c, name, rev = false) {
+  if (!c.play(name, { loop: false, rev, restart: true, blend: 0.15 })) return false;
+  c.base.kz = 1; return true;
+}
+function sit(c, slot) {
+  if (c.downed || c.act || c.drawing || c.drawn || slot.taken) return false;
+  slot.taken = c; c.pos.copy(slot.p); c.heading = slot.heading; c.mv.f = c.mv.s = 0;
+  c.act = { type: 'sit', id: ++actId, t: 0, phase: 'down0', slot, K: slot.kind };
+  sitClip(c, `T_${slot.kind}_STAND_2_S0`); return true;
+}
+function standUp(c) {
+  const a = c.act; if (!a || a.type !== 'sit' || a.phase === 'up1' || a.phase === 'up0') return;
+  a.phase = 'up1'; sitClip(c, `T_${a.K}_S0_2_S1`, true);
+}
+function sitTick(c, a, dt) {
+  if (a.phase === 'down0' && c.done()) { a.phase = 'down1'; sitClip(c, `T_${a.K}_S0_2_S1`); }
+  else if (a.phase === 'down1' && c.done()) { a.phase = 'seated'; a.t = 0; c.play(`S_${a.K}_S1`, { loop: true, blend: 0.2 }); c.base.kz = 1; a.fidget = rand(5, 12); }
+  else if (a.phase === 'seated') {
+    if (c.base) c.base.kz = 1;
+    if (a.K === 'CHAIR' && (a.fidget -= dt) < 0) { a.fidget = rand(6, 14); c.overlay(`R_CHAIR_RANDOM_${1 + Math.floor(Math.random() * 4)}`); }
+  }
+  else if (a.phase === 'up1' && c.done()) { a.phase = 'up0'; sitClip(c, `T_${a.K}_STAND_2_S0`, true); }
+  else if (a.phase === 'up0' && c.done()) { a.slot.taken = null; c.act = null; c.play('S_RUN', { blend: 0.2 }); }
+}
+const isSeated = c => c.act && c.act.type === 'sit';
+// idle NPCs whose post is at a seat start the scene sitting on it (Snaf's waypoint is on a bench): home is that seat
+for (const n of npcs) {
+  if (n.duty !== 'idle') continue;
+  const sl = seatSlots.filter(x => !x.taken && x.p.distanceTo(n.home) < 2.5).sort((a, b) => a.p.distanceTo(n.home) - b.p.distanceTo(n.home))[0];
+  if (sl) { n.home.copy(sl.p); n.pos.copy(sl.p); if (sit(n, sl)) n.sitT = rand(25, 45); }
 }
 
 // ---------------------------------------------------------------- HUD
@@ -1684,6 +1821,7 @@ function frame() {
   playerInput(dt);
   for (const n of npcs) n.hl = n === player.focus && !convo;
   for (const d of doors) d.hl = d === player.focusDoor && !convo;
+  updatePfx(dt);
   updateDoors(dt); updateProjectiles(dt);
   for (const c of entities) nockTick(c);
   if (convo) { player.mv.f = player.mv.s = 0; turnTo(player, convo.npc.pos, dt); }
@@ -1713,13 +1851,13 @@ function frame() {
   updateCamera(dt);
   updateBarrier(dt); updateWeather(dt);
   const now = performance.now() * 0.001;
-  for (const f of flames) { const k = f.flicker ? 0.82 + 0.12 * Math.sin(now * 11 + f.ph) + 0.06 * Math.random() : 1; f.pl.intensity = 8 * k; f.s.scale.setScalar(1.4 * k); }
+  for (const f of flames) { const k = f.flicker ? 0.82 + 0.12 * Math.sin(now * 11 + f.ph) + 0.06 * Math.random() : 1; f.pl.intensity = 8 * k; }
   if ((hudT += dt) > 0.05) { hudT = 0; updateHud(); }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 window.__game = {
-  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, shoot, switchWeapon, projectiles, hitChance, story, openMenu, get convo() { return convo; }, barrierState: { flashes, bolts, barrier }, doors, useDoor, setWeather, wx, barrierFlash, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
+  player, npcs, camera, scene, THREE, CLIPS, PIT, startDuel, jump, seatSlots, sit, standUp, pfxSystems, shoot, switchWeapon, projectiles, hitChance, story, openMenu, get convo() { return convo; }, barrierState: { flashes, bolts, barrier }, doors, useDoor, setWeather, wx, barrierFlash, findLedge, setScheme, toggleLock, get lockOn() { return lockOn; }, groundAt, setBrightness, get theme() { return theme; }, startAttack, parade, jumpBack, toggleWeapon, knockDown, actionInput, setStyle, hurt, tris: tris.length,
   get yaw() { return player.heading; }, set yaw(v) { player.heading = v; }, set pitch(v) { pitch = v; },
   set sneak(v) { sneakOn = v; },
 };

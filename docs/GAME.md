@@ -106,6 +106,22 @@ does the weapon's damage minus the target's protection against arrows (`point`);
 the way is hit too; projectiles stick in walls. NPCs with ammunition and a clear line of sight shoot from beyond 7 m
 and switch to their melee weapon closer than 4.5 m.
 
+## Fire, smoke, torches; the sun
+Fires, smoke, wall torches, embers and bubbling cauldrons are Gothic's particle effects: export_world.py collects the
+`.PFX` vobs (FIRE, FIRE_SMOKE, TORCH, COALGLOW, FIRE_MEDIUM, CAULDRON_BUBBLES) and their settings from
+PARTICLEFX.DAT (emission rate, lifetime, emitter shape, direction and speed, gravity, size growth, colour and alpha
+over life, additive or blended, texture), converted to metres and seconds. The game runs them as camera-facing
+points for the emitters within 45 m of the camera. Fire light vobs still light the scene and flicker, without the
+old flat glow blob. The sun (`UNSUN5`) is drawn with the sky, so the world covers it.
+
+## Sitting
+Every chair, bench and throne (Gothic mob models) brings its seat slots (`ZS_POS*` nodes): where the sitter ends up
+and which way he faces. Near a free slot in front of the hero (weapon sheathed) the action key / E sits down with the
+human model's own clips (`T_x_STAND_2_S0` -> `T_x_S0_2_S1` -> `S_x_S1`; chairs add `R_CHAIR_RANDOM_*` fidgets); any
+movement or the action key plays them backwards. Their root carries the step onto the seat, so it is drawn rather than
+moving the character. Idle NPCs (Snaf) start on the seat at their post, get up after a while, and sit down on free
+seats near home now and then; a hit gets them up.
+
 ## NPC AI (`aiStep`)
 | Duty | Behaviour |
 |---|---|

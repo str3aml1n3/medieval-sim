@@ -34,6 +34,10 @@ BASE = [
         f'T_MOVE_2_{w}MOVE', f'S_{w}RUN', f'S_{w}RUNL', f'S_{w}WALKL', f'S_{w}SNEAK', f'S_{w}SNEAKL',
         f'T_{w}RUNSTRAFEL', f'T_{w}RUNSTRAFER', f'T_{w}SNEAKSTRAFEL', f'T_{w}RUNTURNL', f'T_{w}RUNTURNR',
         f'T_{w}RUN_2_{w}AIM', f'C_{w}_5', f'S_{w}SHOOT', f'T_{w}RELOAD', f'T_{w}AIM_2_{w}RUN', f'T_{w}JUMPB')],
+    # sitting on chairs, benches and thrones: step to the seat, sit down, the sitting loop, fidgets on a chair
+    # (S0 = standing at the seat, S1 = seated; standing up plays the same transitions in reverse, as Gothic's aliases do)
+    *[n for k in ('CHAIR', 'BENCH', 'THRONE') for n in (f'T_{k}_STAND_2_S0', f'S_{k}_S0', f'T_{k}_S0_2_S1', f'S_{k}_S1')],
+    'R_CHAIR_RANDOM_1', 'R_CHAIR_RANDOM_2', 'R_CHAIR_RANDOM_3', 'R_CHAIR_RANDOM_4',
     # hit / down
     'T_STUMBLE', 'T_STUMBLEB', 'T_STAND_2_WOUNDED', 'S_WOUNDED', 'T_WOUNDED_2_STAND',
     'T_STAND_2_WOUNDEDB', 'S_WOUNDEDB', 'T_WOUNDEDB_2_STAND',

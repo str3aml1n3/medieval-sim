@@ -85,6 +85,10 @@ def make_textures():
     save_tex('SI_HAIR', colorize(noise(32, 32, (8, 16)), (30, 22, 16), (70, 52, 34)))
     save_tex('SI_BOOTS', colorize(noise(32, 32, (4, 8)), (40, 30, 22), (74, 56, 40)))
     save_tex('SI_METAL', colorize(noise(32, 64, (2, 8)), (150, 154, 160), (220, 224, 230)))
+    yy, xx = np.mgrid[0:64, 0:64]; rr = np.hypot(xx - 32, (yy - 36) * 0.8) / 30
+    fl = np.zeros((64, 64, 4), np.uint8); a = np.clip(1 - rr, 0, 1) ** 1.6
+    fl[..., 0] = 255; fl[..., 1] = (90 + 150 * a).astype(np.uint8); fl[..., 2] = (30 * a).astype(np.uint8); fl[..., 3] = (255 * a).astype(np.uint8)
+    Image.fromarray(fl).save(os.path.join(OUT, 'tex', 'SI_FLAME.png'))
     save_tex('SI_GRIP', colorize(noise(32, 32, (4, 16)), (50, 34, 22), (90, 62, 40)))
 
 
@@ -200,12 +204,22 @@ def build_world():
         doors.append(hut(W, ang, r, locked))
     for ang, r, h in ((228, 17, 0.9), (240, 17.5, 1.5), (252, 18, 2.4)):  # low / mid / hang-and-pull-up climbs
         cx, _, cz = polar(r, ang, 0); W.box('SI_CRATE_WOOD', (cx - 0.8, 0, cz - 0.8), (cx + 0.8, h, cz + 0.8), (196, 188, 172), 1.0)
-    for ang, r in ((262, 15.6), (292, 18.2)):  # benches beside the bench waypoints
+    seats = []
+    for ang, r in ((262, 15.6), (292, 18.2)):  # benches beside the bench waypoints, with four seat slots each
         cx, _, cz = polar(r, ang, 0); W.box('SI_WALL_WOOD', (cx - 0.9, 0, cz - 0.25), (cx + 0.9, 0.45, cz + 0.25), (180, 170, 156), 1.0)
+        seats.append({'kind': 'BENCH', 'slots': [{'p': [round(cx + dx, 3), 0.0, round(cz + dz, 3)], 'dir': [0, dz / abs(dz)]}
+                                                 for dz in (-0.05, 0.05) for dx in (-0.45, 0.45)]})
     for ang in (150, 210, 330, 30):  # torches on posts at the rim
         cx, _, cz = polar(PIT_R + 0.8, ang, 0); W.box('SI_WALL_WOOD', (cx - 0.07, 0, cz - 0.07), (cx + 0.07, 1.9, cz + 0.07), (170, 160, 150), 1.0)
         lights.append({'p': [round(cx, 2), 2.05, round(cz, 2)], 'c': [255, 170, 90], 'r': 9.0, 'flicker': True})
-    return W, doors, lights
+    pfx = [{'n': 'FIRE', 'p': L['p'][:1] + [1.95] + L['p'][2:]} for L in lights]
+    return W, doors, lights, seats, pfx
+
+
+# the torches' flames: settings in the format export_world.py reads from Gothic's PARTICLEFX.DAT
+PFX_DEFS = {'FIRE': {'tex': 'SI_FLAME', 'pps': 30, 'life': 0.7, 'lifeVar': 0.2, 'shape': 'SPHERE', 'dim': 0.08, 'volume': True, 'offset': [0, 0, 0],
+                     'dirMode': 'DIR', 'elev': 90, 'elevVar': 15, 'headVar': 180, 'vel': 0.3, 'velVar': 0.1, 'gravity': [0, 1.5, 0],
+                     'size': [0.18, 0.18], 'sizeEnd': 2.2, 'alpha': [0.9, 0.0], 'color': [[1, 0.85, 0.6], [1, 0.4, 0.1]], 'blend': 'ADD', 'velo': False}}
 
 
 DOOR_W, DOOR_H = 1.1, 2.1
@@ -620,6 +634,16 @@ def build_anims():
         hopk = keyed([(0, base), (5, merge(base, {'BIP01 L THIGH': (40, 0, 0), 'BIP01 R THIGH': (40, 0, 0), 'BIP01 L CALF': (-60, 0, 0), 'BIP01 R CALF': (-60, 0, 0)})), (12, base)])
         C[f'T_{K}JUMPB'] = make_clip(13, lambda f, hopk=hopk: merge(hopk(f), {'root': (0, STAND_Y + 0.1 * math.sin(math.pi * f / 12), 0.9 * min(1, f / 12))}))
 
+    # sitting on a bench: step to the seat (S0), sit down (S0 -> S1), the seated loop (S1)
+    seated = {'BIP01 L THIGH': (88, 0, -4), 'BIP01 R THIGH': (88, 0, 4), 'BIP01 L CALF': (-88, 0, 0), 'BIP01 R CALF': (-88, 0, 0),
+              'BIP01 L UPPERARM': (25, 0, -8), 'BIP01 R UPPERARM': (25, 0, 8), 'BIP01 L FOREARM': (40, 0, 0), 'BIP01 R FOREARM': (40, 0, 0),
+              'BIP01 SPINE': (-6, 0, 0), 'root': (0, 0.62, 0)}
+    s0 = merge(IDLE, {'root': (0, STAND_Y, 0.75)})
+    C['T_BENCH_STAND_2_S0'] = make_clip(5, keyed([(0, s0), (4, s0)]))
+    C['S_BENCH_S0'] = make_clip(1, lambda f: s0)
+    C['T_BENCH_S0_2_S1'] = make_clip(30, keyed([(0, s0), (14, merge(crouch, {'root': (0, 0.78, 0.35)})), (29, seated)]))
+    C['S_BENCH_S1'] = make_clip(2, keyed([(0, seated), (1, merge(seated, {'BIP01 HEAD': (4, 6, 0)}))]))
+
     # hits and knock-downs
     for name, sgn in (('T_STUMBLE', 1), ('T_STUMBLEB', -1)):
         rock = merge(READY, {'BIP01 SPINE': (22 * sgn, 0, 0), 'BIP01 L UPPERARM': (40, 0, -40), 'BIP01 HEAD': (15 * sgn, 0, 0)})
@@ -830,8 +854,8 @@ def build_audio():
 # ================================================================== main
 if __name__ == '__main__':
     make_textures()
-    W, doors, lights = build_world()
-    ntri, nbytes = W.write({'lights': lights, 'doors': doors, 'doorMesh': door_mesh(), 'doorFps': 25, 'doorSfx': {'open': 4, 'close': 0}})
+    W, doors, lights, seats, pfx = build_world()
+    ntri, nbytes = W.write({'lights': lights, 'pfx': pfx, 'pfxDefs': PFX_DEFS, 'seats': seats, 'doors': doors, 'doorMesh': door_mesh(), 'doorFps': 25, 'doorSfx': {'open': 4, 'close': 0}})
     save_json('waypoints.json', waypoints())
     barrier()
     clips = build_anims()

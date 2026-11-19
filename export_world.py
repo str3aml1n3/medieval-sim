@@ -254,6 +254,55 @@ def door(c):
                   'p': [round(c.position.x * S, 2), round(c.position.y * S, 2), round(-c.position.z * S, 2)], **mats})
 
 
+# ------------------------------------------------------------------ particle effects and seats
+# Fires, smoke, wall torches and embers are Gothic particle effects (.PFX vobs) defined in PARTICLEFX.DAT; the game
+# runs them from these settings (converted to metres / seconds). Seats: every chair, bench and throne (oCMobInter
+# models) with its seat slots (ZS_POS* nodes): where a sitter stands and which way he faces.
+PFX_USED = ('FIRE', 'FIRE_SMOKE', 'TORCH', 'COALGLOW', 'FIRE_MEDIUM', 'CAULDRON_BUBBLES')
+pfx, seats, pfx_tex = [], [], set()
+
+
+def vec(sv, n=3):
+    try: v = [float(x) for x in str(sv).split()]
+    except ValueError: v = []
+    return (v + [0.0] * n)[:n]
+
+
+def pfx_defs():
+    pvm = zenkit.DaedalusVm.load(os.path.join(WORK, 'scripts', '_compiled', 'PARTICLEFX.DAT')); pvm.register_external_default(lambda s_: None)
+    out = {}
+    for name in sorted({e['n'] for e in pfx}):
+        e = pvm.init_instance(name, zenkit.DaedalusInstanceType.PARTICLE_EFFECT)
+        tex = (e.vis_name_s or '').upper().rsplit('.', 1)[0]; pfx_tex.add(tex)
+        size = vec(e.vis_size_start_s, 2); off = vec(e.shp_offset_vec_s); grav = vec(e.fly_gravity_s)
+        out[name] = {'tex': tex, 'pps': e.pps_value, 'life': e.lsp_part_avg / 1000, 'lifeVar': e.lsp_part_var / 1000,
+                     'shape': (e.shp_type_s or 'POINT').upper(), 'dim': float(vec(e.shp_dim_s, 1)[0]) * S, 'volume': bool(e.shp_is_volume),
+                     'offset': [off[0] * S, off[1] * S, -off[2] * S], 'dirMode': (e.dir_mode_s or 'NONE').upper(),
+                     'elev': e.dir_angle_elev, 'elevVar': e.dir_angle_elev_var, 'headVar': e.dir_angle_head_var,
+                     'vel': e.vel_avg * 10, 'velVar': e.vel_var * 10, 'gravity': [grav[0] * 1e4, grav[1] * 1e4, -grav[2] * 1e4],
+                     'size': [size[0] * S, size[1] * S], 'sizeEnd': e.vis_size_end_scale or 1, 'alpha': [e.vis_alpha_start / 255, e.vis_alpha_end / 255],
+                     'color': [[c / 255 for c in vec(e.vis_tex_color_start_s)], [c / 255 for c in vec(e.vis_tex_color_end_s)]],
+                     'blend': (e.vis_alpha_func_s or 'BLEND').upper(), 'velo': (e.vis_orientation_s or '').upper() == 'VELO'}
+    return out
+
+
+def seat_slots(c, name):
+    """world-space seat slots of a chair/bench/throne: position and the direction the sitter faces (game space)"""
+    mdl = zenkit.Model.load(vfs.find(name.rsplit('.', 1)[0] + '.MDL').open())
+    nodes = mdl.hierarchy.nodes; world_ = []
+    for nd in nodes:
+        L = m4(nd.transform); world_.append(L if nd.parent < 0 else world_[nd.parent] @ L)
+    cols = c.rotation.columns
+    V = np.eye(4); V[:3, :3] = [[cols[j].x for j in range(3)], [cols[j].y for j in range(3)], [cols[j].z for j in range(3)]]
+    V[:3, 3] = [c.position.x, c.position.y, c.position.z]
+    out = []
+    for i, nd in enumerate(nodes):
+        if not nd.name.upper().startswith('ZS_POS'): continue
+        M = V @ world_[i]; pos = M[:3, 3]; at = M[:3, 2]  # the slot's z axis: where the sitter looks
+        out.append({'p': [round(pos[0] * S, 3), round(pos[1] * S, 3), round(-pos[2] * S, 3)], 'dir': [round(at[0], 3), round(-at[2], 3)]})
+    return out
+
+
 def walk(v):
     global decals
     for c in v.children:
@@ -266,6 +315,12 @@ def walk(v):
                            'r': round(c.range * S, 1), 'flicker': bool(len(c.color_animation) > 1 or c.range_animation_scale)})
         if not c.visual or not c.show_visual: continue
         name = c.visual.name.upper()
+        if name.endswith('.PFX') and name[:-4] in PFX_USED:
+            pfx.append({'n': name[:-4], 'p': [round(p.x * S, 2), round(p.y * S, 2), round(-p.z * S, 2)]}); continue
+        if tn == 'InteractiveObject' and any(k in name for k in ('CHAIR', 'BENCH', 'THRONE')):
+            kind = 'THRONE' if 'THRONE' in name and 'BENCH' not in name else 'BENCH' if 'BENCH' in name else 'CHAIR'
+            try: seats.append({'kind': kind, 'slots': seat_slots(c, name)})
+            except Exception as e: print('  seat failed', name, e)
         ext = name.rsplit('.', 1)[-1] if '.' in name else ''
         if ext == 'TGA':
             if type(c.visual).__name__ == 'VisualDecal': decal(c); decals += 1
@@ -309,10 +364,15 @@ for base, alpha, flag, g in out:
     meshes.append(meta)
 open('export/world.bin', 'wb').write(blob)
 print('doors', len(doors), 'locked', sum(d['locked'] for d in doors))
+pfx_def = pfx_defs()
+for t in pfx_tex:  # particle textures
+    f = vfs.find(t + '-C.TEX')
+    if f: tx = zenkit.Texture.load(f.open()); Image.frombytes('RGBA', (tx.width, tx.height), tx.mipmap_rgba(0)).save(f'export/tex/{t}.png')
+print('particle emitters', collections.Counter(e['n'] for e in pfx), 'seats', collections.Counter(x['kind'] for x in seats))
 for t in door_mesh:  # the door leaf's textures
     if t not in saved:
         f = vfs.find(t + '-C.TEX')
         if f: tx = zenkit.Texture.load(f.open()); Image.frombytes('RGBA', (tx.width, tx.height), tx.mipmap_rgba(0)).save(f'export/tex/{t}.png')
-json.dump({'meshes': meshes, 'lights': lights, 'doors': doors, 'doorMesh': [{'tex': t, **g} for t, g in door_mesh.items()],
+json.dump({'meshes': meshes, 'lights': lights, 'pfx': pfx, 'pfxDefs': pfx_def, 'seats': seats, 'doors': doors, 'doorMesh': [{'tex': t, **g} for t, g in door_mesh.items()],
            'doorFps': door_clips['open'][1], 'doorSfx': {'open': 10 - 6, 'close': 0}, 'center': [REGION_CX * S, 0, -REGION_CZ * S]}, open('export/world.json', 'w'), separators=(',', ':'))
 print('meshes', len(meshes), 'world.bin MB', round(len(blob) / 1e6, 1))
