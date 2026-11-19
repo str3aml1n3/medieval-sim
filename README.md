@@ -61,7 +61,7 @@ The mouse turns the hero in both.
 |---|---|---|
 | move | W / S | W / S |
 | turn on the spot | A / D | – (mouse) |
-| strafe | right mouse (hold) + A / D; while focusing, action + Space + A / D | A / D |
+| strafe | right mouse or Space (hold) + A / D | A / D |
 | walk / run | Tab switches for good, Shift while held | same |
 | jump; facing a ledge: climb up | Space | Alt or V |
 | sneak on/off | X | C |
