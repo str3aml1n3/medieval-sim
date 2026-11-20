@@ -1025,6 +1025,13 @@ function tickAction(c, dt) {
     return;
   }
   if (a.type === 'getup') { if (c.done()) { c.act = null; c.downed = false; if (c.cast && Math.random() < 0.5) bark(c, 'YOUDEFEATEDMEWELL'); } return; }
+  if (a.type === 'parade') {
+    // the hero holds the block while the parry keys stay down: the clip pauses in its block pose (just under half way)
+    // and the parry stays active; letting go plays it out
+    const b = c.base, holdF = b.clip.n * 0.45;
+    if (c.isPlayer && c.parryHold && frameAt(b) >= holdF) { b.rate = 0; a.t = Math.min(a.t, 0.3); }
+    else if (b.rate === 0) b.rate = 1;
+  }
   if (c.done()) c.act = null; // parade, jump back, stumble
 }
 
@@ -1318,7 +1325,7 @@ function onKey(e) {
 const TURN_RATE = 2.6; // rad/s: turning on the spot with A/D (modern scheme)
 function playerInput(dt) {
   const p = player, k = keys;
-  p.mv.f = 0; p.mv.s = 0; p.mv.turn = 0;
+  p.mv.f = 0; p.mv.s = 0; p.mv.turn = 0; p.parryHold = false;
   if (p.downed || lockedUI) return;
   attackBufTick();
   p.mv.f = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0);
@@ -1330,8 +1337,10 @@ function playerInput(dt) {
   if (!modern || strafeMod) p.mv.s = side;
   else if (side && !(p.drawn && actionHeld())) { p.heading -= side * TURN_RATE * dt; p.mv.turn = side; }
   if (p.drawn && actionHeld()) { p.mv.f = 0; if (!strafeMod) p.mv.s = 0; } // holding the action key: the direction keys fight, not walk (Space / right mouse + A/D still strafe)
-  // modern: Space / right mouse + S parries (held). Gothic scheme: right mouse parries.
-  const parry = p.drawn && (modern ? modHeld() && back : rmb);
+  // modern: Space / right mouse + S, or the action key (left mouse / E) + S, parries for as long as they're held.
+  // Gothic scheme: right mouse parries.
+  const parry = p.drawn && (modern ? (modHeld() || actionHeld()) && back : rmb);
+  p.parryHold = parry;
   if (parry) { p.mv.f = 0; if (!p.drawing && !p.act) parade(p); }
   else if (!modern && p.drawn && !p.drawing && p.mv.f < 0) { p.mv.f = 0; if (!p.act) jumpBack(p); } // (Gothic scheme: S jumps back)
   // locked focus (modern scheme): keep facing the target; A/D then circle around it

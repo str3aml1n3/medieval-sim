@@ -594,7 +594,9 @@ def build_anims():
         start, end = (out, across) if side == 'L' else (across, out)
         C[f'T_1HATTACK{side}'] = make_clip(18, keyed([(0, READY), (5, start), (10, end), (17, READY)]),
                                             ev={'optimal_frame': [9], 'hit_end': [16], 'combo_window': [11, 16]})
-    block = merge(READY, {'BIP01 R UPPERARM': (110, 0, 25), 'BIP01 R FOREARM': (40, 0, 0), 'BIP01 R HAND': (0, 0, -80), 'BIP01 SPINE': (5, 0, 0)})
+    # parry: the sword held level across the front of the face, grip beside the right cheek, blade pointing left and a
+    # little up (angles solved so the grip ends up at about (0.3, 1.78, -0.37) and the blade along -x)
+    block = merge(READY, {'BIP01 R UPPERARM': (62, 43, 28), 'BIP01 R FOREARM': (41, 34, 42), 'BIP01 R HAND': (-14, 8, 11), 'BIP01 SPINE': (5, 0, 0)})
     C['T_1HPARADE_O'] = make_clip(16, keyed([(0, READY), (4, block), (11, block), (15, READY)]))
     hop = merge(READY, {'BIP01 L THIGH': (40, 0, 0), 'BIP01 R THIGH': (40, 0, 0), 'BIP01 L CALF': (-60, 0, 0), 'BIP01 R CALF': (-60, 0, 0)})
     jb = keyed([(0, READY), (5, hop), (12, READY)])

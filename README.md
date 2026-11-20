@@ -72,7 +72,7 @@ The mouse turns the hero in both.
 | focus lock on the target in front | hold the action key | – |
 | attack forward / left / right | action + W / A / D | left click / A or D + left click |
 | chain a combo | repeat as the swing ends (too early breaks it) | same |
-| parry | Space / right mouse + S, or action + S | right click, or S + left click |
+| parry (hold to keep blocking) | Space / right mouse + S, or action + S | right click, or S + left click |
 | jump back (weapon drawn) | – | S |
 | talk / open a door / sit down | action key (weapon sheathed) | E |
 | stand up | any movement, or the action key | any movement, or E |
