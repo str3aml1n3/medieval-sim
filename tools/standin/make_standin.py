@@ -584,10 +584,14 @@ def build_anims():
     fwd = keyed(keys)
     C['S_1HATTACK'] = make_clip(43, lambda f: merge(fwd(f), {'root': (0, 0.93, -0.12 * min(3, f / 14))}),
                                 ev={'optimal_frame': [9, 23, 37], 'hit_end': [14, 28, 42], 'combo_window': [10, 14, 24, 28, 38, 42]})
-    for side, sgn in (('L', 1), ('R', -1)):
-        start = merge(READY, {'BIP01 R UPPERARM': (85, 0, 70), 'BIP01 R FOREARM': (20, 0, 0), 'BIP01 SPINE': (0, -35 * sgn, 0)})
-        end = merge(READY, {'BIP01 R UPPERARM': (85, 0, -15), 'BIP01 R FOREARM': (20, 0, 0), 'BIP01 SPINE': (-10, 40 * sgn, 0)})
-        if sgn < 0: start, end = end, start
+    # side swings: the sword arm sweeps across (L) or back out (R), and the torso turns with it, wound up against the
+    # swing at the start and following through at the end. R is L played the other way round (swapping the two key
+    # poses already reverses both the arm and the torso; flipping the twist as well would turn the body against the
+    # blade)
+    out = merge(READY, {'BIP01 R UPPERARM': (85, 0, 70), 'BIP01 R FOREARM': (20, 0, 0), 'BIP01 SPINE': (0, -35, 0)})
+    across = merge(READY, {'BIP01 R UPPERARM': (85, 0, -15), 'BIP01 R FOREARM': (20, 0, 0), 'BIP01 SPINE': (-10, 40, 0)})
+    for side in ('L', 'R'):
+        start, end = (out, across) if side == 'L' else (across, out)
         C[f'T_1HATTACK{side}'] = make_clip(18, keyed([(0, READY), (5, start), (10, end), (17, READY)]),
                                             ev={'optimal_frame': [9], 'hit_end': [16], 'combo_window': [11, 16]})
     block = merge(READY, {'BIP01 R UPPERARM': (110, 0, 25), 'BIP01 R FOREARM': (40, 0, 0), 'BIP01 R HAND': (0, 0, -80), 'BIP01 SPINE': (5, 0, 0)})

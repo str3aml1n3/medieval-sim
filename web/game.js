@@ -14,6 +14,9 @@ const $ = id => document.getElementById(id);
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = a => a[Math.floor(Math.random() * a.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// volume sliders (0-100) to gain: loudness is roughly logarithmic, so a linear gain sounds nearly full until the very
+// bottom of the slider; squaring it spreads the range evenly (50 -> -12 dB, 10 -> -40 dB, 0 -> silent)
+const volCurve = v => (clamp(+v, 0, 100) / 100) ** 2;
 const params = new URLSearchParams(location.search);
 const store = {
   get(k, d) { try { const v = localStorage.getItem('msim.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
@@ -1030,16 +1033,18 @@ const keys = {}; let pitch = 0.22, lockedUI = false, sneakOn = false, rmb = fals
 let spaceT = 0; const SPACE_WINDOW = 120; // ms: Space and a direction pressed this close together are a combination
 let walkOn = false;
 // modern scheme: Space and the right mouse button are the same key. Held + A/D: strafe; held + S: parry (weapon
-// drawn; unarmed you just walk back) - both in playerInput. Pressed alone: jump (or climb), except while focusing.
-// A direction may come a moment after the press, so the decision waits a short window.
+// drawn; unarmed you just walk back) - both in playerInput. Pressed together with forward (W): jump (or climb),
+// except while focusing. W may come a moment after the press, so a press without it waits a short window.
 const modHeld = () => !!keys.Space || rmb;
 function modPress() {
   clearTimeout(spaceT);
-  spaceT = setTimeout(() => {
-    const p = player; if (convo || paused || p.downed) return;
-    const sideKey = keys.KeyA || keys.KeyD || keys.ArrowLeft || keys.ArrowRight;
-    if (!sideKey && !(keys.KeyS || keys.ArrowDown) && !actionHeld()) jump(p);
-  }, SPACE_WINDOW);
+  const tryJump = () => {
+    const p = player; if (convo || paused || p.downed) return false;
+    const fwd = keys.KeyW || keys.ArrowUp, sideKey = keys.KeyA || keys.KeyD || keys.ArrowLeft || keys.ArrowRight;
+    if (!fwd || sideKey || keys.KeyS || keys.ArrowDown || actionHeld()) return false;
+    jump(p); return true;
+  };
+  if (!tryJump()) spaceT = setTimeout(tryJump, SPACE_WINDOW);
 } // Tab switches between running and walking for good; Shift switches only while held
 // two control schemes: 'gothic' (the original's keys) and 'modern' (Space jumps, Ctrl draws, X sneaks, R looks back,
 // right mouse locks the focus on an enemy). Picked in the pause menu, remembered per browser.
@@ -1054,7 +1059,7 @@ addEventListener('keydown', e => {
 // Ctrl is the draw key in the modern scheme, and browsers don't let a page block Ctrl+W: ask before the tab closes
 addEventListener('beforeunload', e => { if (started && scheme === 'modern') { e.preventDefault(); e.returnValue = ''; } });
 addEventListener('keyup', e => { keys[e.code] = false; if (e.code === 'KeyE') actionRelease(); });
-addEventListener('blur', () => { for (const k in keys) keys[k] = false; rmb = false; lmb = false; lockOn = null; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; rmb = false; lmb = false; lockOn = null; attackBuf = null; });
 function lockPointer() {
   // raw (unaccelerated) mouse deltas where supported; avoids OS acceleration making turning inconsistent
   try { const r = renderer.domElement.requestPointerLock({ unadjustedMovement: true }); if (r && r.catch) r.catch(() => renderer.domElement.requestPointerLock()); }
@@ -1091,7 +1096,7 @@ function actionPress() {
   const p = player; if (p.downed) return;
   acquireLock();
   if (!p.drawn && !p.drawing) { interact(); return; }
-  const held = Object.keys(ACTION_DIRS).find(k => keys[k] && !(keys.Space && 'LR'.includes(ACTION_DIRS[k]))); if (held) actionInput(ACTION_DIRS[held]); // direction already down
+  const held = Object.keys(ACTION_DIRS).find(k => keys[k] && !(modHeld() && 'LR'.includes(ACTION_DIRS[k]))); if (held) actionInput(ACTION_DIRS[held]); // direction already down
 }
 function interact() {
   const p = player, n = p.focus && !p.focus.hostile && !p.focus.downed && dist2(p, p.focus) < 3.2 ? p.focus : null;
@@ -1112,16 +1117,31 @@ function acquireLock() {
   }
   lockOn = best || null;
 }
+// an attack pressed while the hero can't swing yet (drawing, stumbling, jumping back, the tail of a swing after its
+// combo window) is kept for a moment and starts as soon as he can, instead of being lost
+let attackBuf = null; const ATTACK_BUF_MS = 400;
 function actionInput(dir) {
   const p = player; if (p.downed) return;
+  attackBuf = null;
   if (!p.drawn && !p.drawing) { if (!convo) toggleWeapon(p, p.lastMode || 'melee'); return; }
-  if (p.drawing) return;
+  if (p.drawing) { attackBuf = { dir, at: performance.now() }; return; }
   if (p.mode === 'ranged') { if (dir === 'F') shoot(p); return; } // aim + shoot; the other directions do nothing
   if (dir === 'B') return parade(p);
   const a = p.act;
-  if (a && a.type === 'attack') { const f = p.frame(), [ws, we] = winOf(a); if (f < ws) a.failed = true; else if (f <= we + 0.5) a.queued = dir; return; }
-  if (a && a.type !== 'parade') return;
+  if (a && a.type === 'attack') {
+    const f = p.frame(), [ws, we] = winOf(a);
+    if (f < ws) a.failed = true; else if (f <= we + 0.5) a.queued = dir; else attackBuf = { dir, at: performance.now() };
+    return;
+  }
+  if (a && a.type !== 'parade') { attackBuf = { dir, at: performance.now() }; return; }
   startAttack(p, dir);
+}
+function attackBufTick() {
+  if (!attackBuf) return;
+  const p = player;
+  if (performance.now() - attackBuf.at > ATTACK_BUF_MS || p.downed || !p.drawn || convo) { attackBuf = null; return; }
+  if (p.drawing || (p.act && p.act.type !== 'parade')) return;
+  const d = attackBuf.dir; attackBuf = null; actionInput(d);
 }
 // ---- start screen + pause menu (controls legend, volumes, mouse, restart)
 let started = false, paused = false;
@@ -1133,15 +1153,15 @@ $('scheme').addEventListener('change', e => setScheme(e.target.value));
 setScheme(scheme);
 function setPaused(v) {
   paused = v; $('pause').style.display = v ? 'flex' : 'none'; if (v) renderJournal();
-  if (v) { for (const k in keys) keys[k] = false; rmb = false; if (document.pointerLockElement) document.exitPointerLock(); $('btnResume').focus(); }
+  if (v) { for (const k in keys) keys[k] = false; rmb = false; lmb = false; attackBuf = null; lockOn = null; if (document.pointerLockElement) document.exitPointerLock(); $('btnResume').focus(); }
   else lockPointer();
 }
 // Esc releases pointer lock in every browser; treat losing the lock mid-game as "open the menu"
 document.addEventListener('pointerlockchange', () => { if (started && !document.pointerLockElement && !lockedUI && !paused) setPaused(true); });
 $('btnResume').addEventListener('click', () => setPaused(false));
 $('btnRestart').addEventListener('click', () => { restartArena(); setPaused(false); });
-$('volMusic').addEventListener('input', e => { musicVol = e.target.value / 100; if (musicVol > 0 && !musicOn) musicOn = true; applyMusicLevel(); });
-$('volSfx').addEventListener('input', e => listener.setMasterVolume(e.target.value / 100));
+$('volMusic').addEventListener('input', e => { musicVol = volCurve(e.target.value); if (musicVol > 0 && !musicOn) musicOn = true; applyMusicLevel(); });
+$('volSfx').addEventListener('input', e => listener.setMasterVolume(volCurve(e.target.value)));
 $('sens').value = Math.round(sens * 100);
 $('bright').value = Math.round(brightness * 100);
 $('bright').addEventListener('input', e => setBrightness(e.target.value / 100));
@@ -1277,8 +1297,8 @@ function onKey(e) {
   const modern = scheme === 'modern';
   if (modern) {
     if (e.code === 'KeyE') actionPress();
-    else if (ACTION_DIRS[e.code] && actionHeld() && (p.drawn || p.drawing) && !p.downed && !(keys.Space && 'LR'.includes(ACTION_DIRS[e.code])))
-      actionInput(ACTION_DIRS[e.code]); // action + direction (with Space, A/D strafe instead of swinging)
+    else if (ACTION_DIRS[e.code] && actionHeld() && (p.drawn || p.drawing) && !p.downed && !(modHeld() && 'LR'.includes(ACTION_DIRS[e.code])))
+      actionInput(ACTION_DIRS[e.code]); // action + direction (with Space / right mouse held, A/D strafe instead of swinging)
   } else if (e.code === 'KeyE' && !p.downed && !p.drawn) interact();
   if ((modern ? e.code === 'ControlLeft' || e.code === 'ControlRight' : e.code === 'Space' || e.code === 'KeyF') && !p.downed) toggleWeapon(p, p.lastMode || 'melee');
   // Gothic's weapon keys: 1 = melee weapon, 2 = bow / crossbow (pressing the drawn one's key sheathes it)
@@ -1300,6 +1320,7 @@ function playerInput(dt) {
   const p = player, k = keys;
   p.mv.f = 0; p.mv.s = 0; p.mv.turn = 0;
   if (p.downed || lockedUI) return;
+  attackBufTick();
   p.mv.f = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0);
   const side = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
   p.gait = sneakOn ? 'sneak' : walkOn !== !!(k.ShiftLeft || k.ShiftRight) ? 'walk' : 'run';
@@ -1308,7 +1329,7 @@ function playerInput(dt) {
   // and right mouse + S parries. Gothic scheme: A/D strafe, right mouse parries.
   if (!modern || strafeMod) p.mv.s = side;
   else if (side && !(p.drawn && actionHeld())) { p.heading -= side * TURN_RATE * dt; p.mv.turn = side; }
-  if (p.drawn && actionHeld()) { p.mv.f = 0; if (!k.Space) p.mv.s = 0; } // holding the action key: the direction keys fight, not walk (Space + A/D still strafe)
+  if (p.drawn && actionHeld()) { p.mv.f = 0; if (!strafeMod) p.mv.s = 0; } // holding the action key: the direction keys fight, not walk (Space / right mouse + A/D still strafe)
   // modern: Space / right mouse + S parries (held). Gothic scheme: right mouse parries.
   const parry = p.drawn && (modern ? modHeld() && back : rmb);
   if (parry) { p.mv.f = 0; if (!p.drawing && !p.act) parade(p); }
@@ -1318,7 +1339,7 @@ function playerInput(dt) {
   if (actionHeld() && !lockOn) acquireLock(); // still holding: take the next target that comes into view
   p.focusDoor = null;
   if (isSeated(p)) { p.mv.f = p.mv.s = 0; p.mv.turn = 0; if (k.KeyW || k.KeyS || k.KeyA || k.KeyD || k.Space) standUp(p); return; }
-  if (lockOn) { if (!p.act || p.act.type === 'parade') turnTo(p, lockOn.pos, dt, 9); p.focus = lockOn; return; }
+  if (lockOn) { if (!p.act || p.act.type === 'parade' || (p.act.type === 'attack' && !p.act.hit)) turnTo(p, lockOn.pos, dt, 9); p.focus = lockOn; return; }
   // focus: the NPC the hero is looking at
   let best = null, bs = 1e9;
   for (const n of npcs) {
@@ -1448,7 +1469,7 @@ function aiStep(n, dt) {
 // Prefers the game's own themes rendered by export_music.py. Like Gothic, exactly one theme plays: the calm camp theme,
 // or the fight theme while someone is attacking the hero (a short crossfade when it switches).
 // Falls back to a small procedural score if those files are missing.
-let musicOn = true, mgain = null, nextNote = 0, step = 0, intensity = 0, musicVol = 0.7, procedural = false, theme = 'std', calmT = 0;
+let musicOn = true, mgain = null, nextNote = 0, step = 0, intensity = 0, musicVol = volCurve($('volMusic').value), procedural = false, theme = 'std', calmT = 0;
 const tracks = {};
 const musicLevel = () => (musicOn ? musicVol * (procedural ? 0.32 : 1) : 0);
 const fetchBuf = u => fetch(u).then(r => (r.ok ? r.arrayBuffer() : null)).then(b => b && actx.decodeAudioData(b)).catch(() => null);
@@ -1609,7 +1630,8 @@ function startRainSound() {
   if (rainSrc || actx.state !== 'running') return;
   rainSrc = actx.createBufferSource(); rainGain = actx.createGain(); rainLP = actx.createBiquadFilter();
   rainGain.gain.value = 0; rainLP.type = 'lowpass'; rainLP.frequency.value = 20000;
-  loadSound('RAIN_01').then(b => { if (!b) return; rainSrc.buffer = b; rainSrc.loop = true; rainSrc.connect(rainLP).connect(rainGain).connect(actx.destination); rainSrc.start(); });
+  // through the listener's gain, so the rain follows the effects volume like every other sound
+  loadSound('RAIN_01').then(b => { if (!b) return; rainSrc.buffer = b; rainSrc.loop = true; rainSrc.connect(rainLP).connect(rainGain).connect(listener.getInput()); rainSrc.start(); });
 }
 function setWeather(m) { weatherMode = m; store.set('weather', m); $('weather').value = m; }
 $('weather').addEventListener('change', e => setWeather(e.target.value));

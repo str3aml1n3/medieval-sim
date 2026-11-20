@@ -63,7 +63,7 @@ The mouse turns the hero in both.
 | turn on the spot | A / D | – (mouse) |
 | strafe | right mouse or Space (hold) + A / D | A / D |
 | walk / run | Tab switches for good, Shift while held | same |
-| jump; facing a ledge: climb up | Space or right mouse (the same key) | Alt or V |
+| jump; facing a ledge: climb up | W + Space or right mouse (the same key) | Alt or V |
 | sneak on/off | X | C |
 | draw / sheathe weapon | Ctrl | Space or F |
 | melee weapon / bow or crossbow | 1 / 2 (again: sheathe) | 1 / 2 |
